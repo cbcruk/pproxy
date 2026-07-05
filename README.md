@@ -120,6 +120,37 @@ engine.add_hook(log_intercept)
 mitmweb -s intercept.py
 ```
 
+## GUI
+
+Editing the rules file by hand gets tedious. The GUI is a small
+zero-dependency web app (Python stdlib only) for managing rules from the
+browser:
+
+```bash
+python -m gui rules.json
+# → open http://127.0.0.1:8765
+```
+
+The GUI only edits the JSON rules file — it never talks to the engine
+directly. Because the proxy hot-reloads that file on every request
+(`JsonLoader.reload_if_changed`), any change you make in the GUI takes
+effect on the running proxy immediately. Keep both running side by side:
+
+```
+┌─────────────┐   writes    ┌────────────┐   reads    ┌────────────┐
+│  GUI (web)  │ ──────────▶ │ rules.json │ ─────────▶ │   engine   │
+└─────────────┘             └────────────┘  hot-reload └────────────┘
+```
+
+The GUI lets you list, add, edit, delete, and reorder rules (order
+matters — first match wins). Options:
+
+```bash
+python -m gui rules.json --host 127.0.0.1 --port 8765
+```
+
+By default it binds to `127.0.0.1` (local access only).
+
 ## Testing
 
 RuleEngine can be unit tested without mitmproxy:

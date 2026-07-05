@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>pproxy — rule manager</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --border: #e2e5ea;
+      --text: #1c2024;
+      --muted: #6b7280;
+      --accent: #2f6feb;
+      --accent-fg: #ffffff;
+      --danger: #d93a49;
+      --code-bg: #f0f2f5;
+      --shadow: 0 1px 3px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
+      --radius: 10px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16181d;
+        --panel: #1f232b;
+        --border: #2e333d;
+        --text: #e6e8ec;
+        --muted: #9198a3;
+        --accent: #4d84f0;
+        --danger: #f06a77;
+        --code-bg: #14161b;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+    header .path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px; color: var(--muted);
+      background: var(--code-bg);
+      padding: 3px 8px; border-radius: 6px;
+    }
+    header .spacer { flex: 1; }
+    main { max-width: 880px; margin: 0 auto; padding: 24px; }
+    button {
+      font: inherit; cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--panel); color: var(--text);
+      padding: 7px 14px; border-radius: 8px;
+      transition: background .12s, border-color .12s;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+    button.primary:hover { filter: brightness(1.06); }
+    button.ghost { border-color: transparent; background: transparent; color: var(--muted); padding: 4px 8px; }
+    button.ghost:hover { color: var(--text); background: var(--code-bg); }
+    button.danger:hover { border-color: var(--danger); color: var(--danger); }
+    button:disabled { opacity: .4; cursor: default; }
+
+    #banner {
+      display: none; margin-bottom: 16px; padding: 10px 14px;
+      border-radius: 8px; border: 1px solid var(--danger);
+      color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent);
+    }
+    #banner.show { display: block; }
+
+    .empty { text-align: center; color: var(--muted); padding: 60px 0; }
+
+    .rule {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+      padding: 14px 16px; margin-bottom: 12px;
+      display: flex; align-items: flex-start; gap: 14px;
+    }
+    .rule .idx {
+      font-variant-numeric: tabular-nums; color: var(--muted);
+      font-size: 12px; padding-top: 2px; min-width: 20px;
+    }
+    .rule .body { flex: 1; min-width: 0; }
+    .rule .toprow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .rule .pattern {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px; font-weight: 600; word-break: break-all;
+    }
+    .tag {
+      font-size: 11px; font-weight: 600; letter-spacing: .02em;
+      padding: 2px 7px; border-radius: 999px; text-transform: uppercase;
+      background: var(--code-bg); color: var(--muted);
+    }
+    .tag.status { color: var(--accent); }
+    .tag.matcher { color: var(--text); }
+    .tag.delay { color: #b7791f; }
+    .rule .name { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .rule .preview {
+      margin: 8px 0 0; padding: 8px 10px; font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: var(--code-bg); border-radius: 6px;
+      max-height: 120px; overflow: auto; white-space: pre-wrap; color: var(--muted);
+    }
+    .rule .actions { display: flex; flex-direction: column; gap: 4px; }
+
+    dialog {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--panel); color: var(--text);
+      padding: 0; width: min(560px, 92vw); box-shadow: var(--shadow);
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, .4); }
+    .dlg-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-weight: 650; }
+    .dlg-body { padding: 20px; max-height: 66vh; overflow: auto; }
+    .dlg-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
+    .field .hint { font-weight: 400; color: var(--muted); }
+    input, select, textarea {
+      font: inherit; width: 100%; padding: 8px 10px;
+      border: 1px solid var(--border); border-radius: 8px;
+      background: var(--bg); color: var(--text);
+    }
+    textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; min-height: 84px; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .row { display: flex; gap: 12px; }
+    .row > .field { flex: 1; }
+    .field .err { color: var(--danger); font-size: 12px; margin-top: 4px; display: none; }
+    .field .err.show { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>pproxy</h1>
+    <span class="path" id="path">—</span>
+    <span class="spacer"></span>
+    <button class="ghost" id="reload" title="Reload from file">↻ Reload</button>
+    <button class="primary" id="add">+ Add rule</button>
+  </header>
+
+  <main>
+    <div id="banner"></div>
+    <div id="list"></div>
+  </main>
+
+  <dialog id="editor">
+    <form method="dialog" id="form">
+      <div class="dlg-head" id="dlg-title">Add rule</div>
+      <div class="dlg-body">
+        <div class="field">
+          <label>URL pattern <span class="hint">— required</span></label>
+          <input name="url_pattern" placeholder="*/api/users/*" autocomplete="off" />
+          <div class="err" data-err="url_pattern"></div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Matcher</label>
+            <select name="matcher">
+              <option value="glob">glob</option>
+              <option value="regex">regex</option>
+              <option value="exact">exact</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Status code</label>
+            <input name="status_code" type="number" value="200" min="100" max="599" />
+          </div>
+          <div class="field">
+            <label>Delay (ms)</label>
+            <input name="delay_ms" type="number" value="0" min="0" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>Name <span class="hint">— optional</span></label>
+            <input name="name" placeholder="user_detail" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Content-Type</label>
+            <input name="content_type" value="application/json" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Body <span class="hint">— JSON, or a plain string in quotes</span></label>
+          <textarea name="body" spellcheck="false">{}</textarea>
+          <div class="err" data-err="body"></div>
+        </div>
+        <div class="field">
+          <label>Headers <span class="hint">— JSON object</span></label>
+          <textarea name="headers" spellcheck="false" style="min-height:56px">{}</textarea>
+          <div class="err" data-err="headers"></div>
+        </div>
+      </div>
+      <div class="dlg-foot">
+        <button type="button" class="ghost" id="cancel">Cancel</button>
+        <button type="submit" class="primary" id="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    const $ = (s, r = document) => r.querySelector(s);
+    const api = async (method, url, body) => {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    };
+
+    let rules = [];
+    let editing = null; // index being edited, or null when adding
+
+    function banner(msg) {
+      const b = $("#banner");
+      if (!msg) { b.classList.remove("show"); return; }
+      b.textContent = msg;
+      b.classList.add("show");
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    }
+
+    function bodyPreview(rule) {
+      if (rule.body === undefined) return "";
+      const b = rule.body;
+      const s = typeof b === "string" ? b : JSON.stringify(b, null, 2);
+      return s.length > 600 ? s.slice(0, 600) + " …" : s;
+    }
+
+    function render() {
+      const list = $("#list");
+      if (!rules.length) {
+        list.innerHTML = '<div class="empty">No rules yet. Click “+ Add rule” to create one.</div>';
+        return;
+      }
+      list.innerHTML = "";
+      rules.forEach((r, i) => {
+        const el = document.createElement("div");
+        el.className = "rule";
+        const status = r.status_code ?? 200;
+        const matcher = r.matcher || "glob";
+        const delay = r.delay_ms ? `<span class="tag delay">${r.delay_ms}ms</span>` : "";
+        const name = r.name ? `<div class="name">${esc(r.name)}</div>` : "";
+        const preview = bodyPreview(r);
+        el.innerHTML = `
+          <div class="idx">${i}</div>
+          <div class="body">
+            <div class="toprow">
+              <span class="pattern">${esc(r.url_pattern)}</span>
+              <span class="tag matcher">${esc(matcher)}</span>
+              <span class="tag status">${status}</span>
+              ${delay}
+            </div>
+            ${name}
+            ${preview ? `<pre class="preview">${esc(preview)}</pre>` : ""}
+          </div>
+          <div class="actions">
+            <button class="ghost" data-up title="Move up">▲</button>
+            <button class="ghost" data-down title="Move down">▼</button>
+            <button class="ghost" data-edit>Edit</button>
+            <button class="ghost danger" data-del>Delete</button>
+          </div>`;
+        $("[data-edit]", el).onclick = () => openEditor(i);
+        $("[data-del]", el).onclick = () => del(i);
+        $("[data-up]", el).onclick = () => move(i, i - 1);
+        $("[data-down]", el).onclick = () => move(i, i + 1);
+        $("[data-up]", el).disabled = i === 0;
+        $("[data-down]", el).disabled = i === rules.length - 1;
+        list.appendChild(el);
+      });
+    }
+
+    async function load() {
+      try {
+        const data = await api("GET", "/api/rules");
+        rules = data.rules;
+        $("#path").textContent = data.path;
+        banner(null);
+        render();
+      } catch (e) {
+        banner(e.message);
+      }
+    }
+
+    function fieldErr(name, msg) {
+      const el = $(`[data-err="${name}"]`);
+      if (!el) return;
+      el.textContent = msg || "";
+      el.classList.toggle("show", !!msg);
+    }
+
+    function openEditor(index) {
+      editing = index;
+      const r = index === null ? {} : rules[index];
+      const f = $("#form");
+      $("#dlg-title").textContent = index === null ? "Add rule" : `Edit rule #${index}`;
+      f.url_pattern.value = r.url_pattern || "";
+      f.matcher.value = r.matcher || "glob";
+      f.status_code.value = r.status_code ?? 200;
+      f.delay_ms.value = r.delay_ms ?? 0;
+      f.name.value = r.name || "";
+      f.content_type.value = r.content_type || "application/json";
+      f.body.value = r.body === undefined ? "{}" : JSON.stringify(r.body, null, 2);
+      f.headers.value = JSON.stringify(r.headers || {}, null, 2);
+      ["url_pattern", "body", "headers"].forEach(n => fieldErr(n, ""));
+      $("#editor").showModal();
+      f.url_pattern.focus();
+    }
+
+    function parseJsonField(name, raw, { allowString } = {}) {
+      const text = raw.trim();
+      if (text === "") return name === "headers" ? {} : {};
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        if (allowString) return text; // treat as a plain string body
+        throw new Error(`${name}: ${e.message}`);
+      }
+    }
+
+    function collect() {
+      const f = $("#form");
+      const pattern = f.url_pattern.value.trim();
+      if (!pattern) { fieldErr("url_pattern", "URL pattern is required"); throw new Error(); }
+      fieldErr("url_pattern", "");
+
+      let body, headers;
+      try { body = parseJsonField("body", f.body.value, { allowString: true }); fieldErr("body", ""); }
+      catch (e) { fieldErr("body", e.message); throw new Error(); }
+      try {
+        headers = parseJsonField("headers", f.headers.value);
+        if (typeof headers !== "object" || Array.isArray(headers)) throw new Error("must be a JSON object");
+        fieldErr("headers", "");
+      } catch (e) { fieldErr("headers", e.message); throw new Error(); }
+
+      const rule = {
+        url_pattern: pattern,
+        matcher: f.matcher.value,
+        status_code: Number(f.status_code.value) || 200,
+        content_type: f.content_type.value.trim() || "application/json",
+        body,
+        headers,
+      };
+      if (f.name.value.trim()) rule.name = f.name.value.trim();
+      const delay = Number(f.delay_ms.value) || 0;
+      if (delay > 0) rule.delay_ms = delay;
+      return rule;
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      let rule;
+      try { rule = collect(); } catch { return; }
+      try {
+        if (editing === null) await api("POST", "/api/rules", rule);
+        else {
+          const data = await api("PUT", `/api/rules/${editing}`, rule);
+          rules = data.rules;
+        }
+        $("#editor").close();
+        await load();
+      } catch (err) {
+        banner(err.message);
+      }
+    }
+
+    async function del(index) {
+      if (!confirm(`Delete rule #${index}?`)) return;
+      try { const data = await api("DELETE", `/api/rules/${index}`); rules = data.rules; render(); banner(null); }
+      catch (e) { banner(e.message); }
+    }
+
+    async function move(index, to) {
+      if (to < 0 || to >= rules.length) return;
+      try { const data = await api("POST", `/api/rules/${index}/move`, { to }); rules = data.rules; render(); banner(null); }
+      catch (e) { banner(e.message); }
+    }
+
+    $("#add").onclick = () => openEditor(null);
+    $("#reload").onclick = load;
+    $("#cancel").onclick = () => $("#editor").close();
+    $("#form").addEventListener("submit", save);
+
+    load();
+  </script>
+</body>
+</html>
