@@ -120,60 +120,44 @@ engine.add_hook(log_intercept)
 mitmweb -s intercept.py
 ```
 
-## GUI
+## Menu bar app (macOS)
 
-Editing the rules file by hand gets tedious. pproxy ships a small
-zero-dependency web app (Python stdlib only) for managing rules from the
-browser — list, add, edit, delete, and reorder them (order matters, first
-match wins).
+Managing the proxy from a terminal gets tedious. pproxy ships a macOS
+menu bar app (built on [rumps](https://github.com/jaredks/rumps)) that
+starts and stops the proxy and opens the rules file for editing — all
+from the menu bar.
 
-The GUI never talks to the engine directly. It only edits the JSON rules
-file, and because the proxy hot-reloads that file on every request
-(`JsonLoader.reload_if_changed`), edits go live on the next intercepted
-request — no restart:
-
-```
-┌─────────────┐   writes    ┌────────────┐   reads    ┌────────────┐
-│  GUI (web)  │ ──────────▶ │ rules.json │ ─────────▶ │   engine   │
-└─────────────┘             └────────────┘  hot-reload └────────────┘
-```
-
-### Embedded — one process (recommended)
-
-`create_addon` embeds the GUI by default, so a single `mitmweb` runs both
-the proxy and the GUI:
-
-```python
-# intercept.py
-from pproxy import create_addon
-addon = create_addon("rules.json")  # GUI on http://127.0.0.1:8765
-```
+Install the extra and run it:
 
 ```bash
-mitmweb -s intercept.py
-# proxy is up, and the rule GUI is at http://127.0.0.1:8765
+pip install -e ".[tray]"
+python -m tray            # uses intercept.py + rules.json in the cwd
+python -m tray --script intercept.py --rules rules.json
 ```
 
-Edit rules in the browser while the proxy runs — changes take effect on
-the next request. The GUI starts and stops together with the proxy.
+The menu offers:
 
-Customize or disable it:
+- **Start / Stop proxy** — runs `mitmdump -s intercept.py` as a child
+  process and shows the running state in the menu bar title.
+- **Edit rules…** — opens the rules file in your editor. Because the
+  proxy hot-reloads that file (`JsonLoader.reload_if_changed`), edits go
+  live on the next intercepted request — no restart.
+- **Set editor…** — change the editor command.
+- **Quit** — stops the proxy and exits.
 
-```python
-create_addon("rules.json", gui_port=9000)   # different port
-create_addon("rules.json", gui=False)        # proxy only, no GUI
-```
+The editor defaults to VS Code (`code`). Override it, in order of
+precedence:
 
-### Standalone
-
-You can also run the GUI on its own — handy for editing rules without the
-proxy running:
+1. the `PPROXY_EDITOR` environment variable, or
+2. the `editor` key in `~/.config/pproxy/config.json` (written by
+   **Set editor…**).
 
 ```bash
-python -m gui rules.json --host 127.0.0.1 --port 8765
+PPROXY_EDITOR="subl" python -m tray   # use Sublime Text instead
 ```
 
-By default it binds to `127.0.0.1` (local access only).
+The app is macOS-only. On other platforms, drive the proxy directly with
+`mitmdump`/`mitmweb` as shown above and edit the rules file in any editor.
 
 ## Testing
 
