@@ -89,6 +89,34 @@ class TestApi:
             assert e.code == 400
 
 
+class TestEmbeddedLifecycle:
+    """The start()/shutdown() path used when the GUI is embedded in the proxy."""
+
+    def test_start_serves_then_shutdown_stops(self, tmp_path):
+        store = RuleStore(tmp_path / "rules.json")
+        srv = GuiServer(store, host="127.0.0.1", port=0)
+        srv.start()
+        base = f"http://{srv.address[0]}:{srv.address[1]}"
+        try:
+            status, data = req(base, "GET", "/api/rules")
+            assert status == 200
+            assert data["rules"] == []
+        finally:
+            srv.shutdown()
+        with pytest.raises(urllib.error.URLError):
+            req(base, "GET", "/api/rules")
+
+    def test_start_is_idempotent(self, tmp_path):
+        srv = GuiServer(RuleStore(tmp_path / "rules.json"), host="127.0.0.1", port=0)
+        srv.start()
+        srv.start()  # must not raise or spawn a second thread
+        try:
+            status, _ = req(f"http://{srv.address[0]}:{srv.address[1]}", "GET", "/api/rules")
+            assert status == 200
+        finally:
+            srv.shutdown()
+
+
 class TestStatic:
     def test_serves_spa(self, server):
         with urllib.request.urlopen(server + "/") as resp:

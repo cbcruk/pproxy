@@ -1,11 +1,15 @@
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from mitmproxy import http
 
 from engine import RuleEngine
 from cors import build_cors_headers
 from loaders.json_loader import JsonLoader
+
+if TYPE_CHECKING:
+    from gui.server import GuiServer
 
 logger = logging.getLogger("pproxy")
 
@@ -16,14 +20,41 @@ class MitmproxyAddon:
     Contains no business logic — only translates between mitmproxy's
     ``HTTPFlow`` objects and the engine's plain-Python types.
 
+    When a ``gui`` server is supplied, it runs in a background thread for
+    the lifetime of the proxy, so a single ``mitmweb -s intercept.py``
+    serves both the proxy and the rule-management GUI. The GUI edits the
+    same rules file the loader hot-reloads, so edits go live on the next
+    intercepted request — no restart, no second process.
+
     Args:
         engine: The RuleEngine that holds interception rules.
         loader: Optional loader for hot-reloading rules on each request.
+        gui: Optional embedded GUI server, started/stopped with the proxy.
     """
 
-    def __init__(self, engine: RuleEngine, loader: JsonLoader | None = None) -> None:
+    def __init__(
+        self,
+        engine: RuleEngine,
+        loader: JsonLoader | None = None,
+        gui: "GuiServer | None" = None,
+    ) -> None:
         self._engine = engine
         self._loader = loader
+        self._gui = gui
+
+    # ── mitmproxy lifecycle ────────────────────────────────
+
+    def running(self) -> None:
+        """Called by mitmproxy once the proxy is up. Starts the GUI."""
+        if self._gui is not None:
+            host, port = self._gui.address
+            self._gui.start()
+            logger.info(f"[pproxy] rule GUI at http://{host}:{port}")
+
+    def done(self) -> None:
+        """Called by mitmproxy on shutdown. Stops the GUI thread."""
+        if self._gui is not None:
+            self._gui.shutdown()
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Called by mitmproxy for every incoming HTTP request.

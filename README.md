@@ -122,19 +122,15 @@ mitmweb -s intercept.py
 
 ## GUI
 
-Editing the rules file by hand gets tedious. The GUI is a small
+Editing the rules file by hand gets tedious. pproxy ships a small
 zero-dependency web app (Python stdlib only) for managing rules from the
-browser:
+browser — list, add, edit, delete, and reorder them (order matters, first
+match wins).
 
-```bash
-python -m gui rules.json
-# → open http://127.0.0.1:8765
-```
-
-The GUI only edits the JSON rules file — it never talks to the engine
-directly. Because the proxy hot-reloads that file on every request
-(`JsonLoader.reload_if_changed`), any change you make in the GUI takes
-effect on the running proxy immediately. Keep both running side by side:
+The GUI never talks to the engine directly. It only edits the JSON rules
+file, and because the proxy hot-reloads that file on every request
+(`JsonLoader.reload_if_changed`), edits go live on the next intercepted
+request — no restart:
 
 ```
 ┌─────────────┐   writes    ┌────────────┐   reads    ┌────────────┐
@@ -142,8 +138,36 @@ effect on the running proxy immediately. Keep both running side by side:
 └─────────────┘             └────────────┘  hot-reload └────────────┘
 ```
 
-The GUI lets you list, add, edit, delete, and reorder rules (order
-matters — first match wins). Options:
+### Embedded — one process (recommended)
+
+`create_addon` embeds the GUI by default, so a single `mitmweb` runs both
+the proxy and the GUI:
+
+```python
+# intercept.py
+from pproxy import create_addon
+addon = create_addon("rules.json")  # GUI on http://127.0.0.1:8765
+```
+
+```bash
+mitmweb -s intercept.py
+# proxy is up, and the rule GUI is at http://127.0.0.1:8765
+```
+
+Edit rules in the browser while the proxy runs — changes take effect on
+the next request. The GUI starts and stops together with the proxy.
+
+Customize or disable it:
+
+```python
+create_addon("rules.json", gui_port=9000)   # different port
+create_addon("rules.json", gui=False)        # proxy only, no GUI
+```
+
+### Standalone
+
+You can also run the GUI on its own — handy for editing rules without the
+proxy running:
 
 ```bash
 python -m gui rules.json --host 127.0.0.1 --port 8765

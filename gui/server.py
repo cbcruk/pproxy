@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -184,6 +185,7 @@ class GuiServer:
         self.store = store
         handler = type("BoundHandler", (_Handler,), {"store": store})
         self._httpd = ThreadingHTTPServer((host, port), handler)
+        self._thread: threading.Thread | None = None
 
     @property
     def address(self) -> tuple[str, int]:
@@ -191,11 +193,29 @@ class GuiServer:
         return str(host), int(port)
 
     def serve_forever(self) -> None:
+        """Serve in the current thread, blocking until ``shutdown``."""
         self._httpd.serve_forever()
+
+    def start(self) -> None:
+        """Serve in a background daemon thread.
+
+        Idempotent — calling it twice is a no-op. Used when the GUI is
+        embedded inside another process (e.g. the mitmproxy addon) so a
+        single ``mitmweb -s intercept.py`` runs both the proxy and the GUI.
+        """
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever, name="pproxy-gui", daemon=True
+        )
+        self._thread.start()
 
     def shutdown(self) -> None:
         self._httpd.shutdown()
         self._httpd.server_close()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+            self._thread = None
 
 
 def serve(rules_path: str, host: str = "127.0.0.1", port: int = 8765) -> None:
