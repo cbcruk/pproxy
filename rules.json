@@ -1,0 +1,12 @@
+[
+  {
+    "name": "example_mock",
+    "url_pattern": "*/api/example*",
+    "matcher": "glob",
+    "status_code": 200,
+    "body": {
+      "message": "mocked by pproxy",
+      "items": []
+    }
+  }
+]

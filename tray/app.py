@@ -1,5 +1,6 @@
 import rumps
 
+from tray import sysproxy
 from tray.config import Config
 from tray.editor import EditorError, open_in_editor
 from tray.proxy import ProxyController
@@ -44,8 +45,13 @@ class PproxyTray(rumps.App):
     # ── Menu actions ───────────────────────────────────────
 
     def _toggle(self, _: rumps.MenuItem) -> None:
+        if self._proxy.is_running():
+            self._proxy.stop()
+            sysproxy.disable()
+            self._sync(False)
+            return
         try:
-            running = self._proxy.toggle()
+            self._proxy.start()
         except FileNotFoundError:
             rumps.alert(
                 "pproxy",
@@ -53,7 +59,8 @@ class PproxyTray(rumps.App):
                 f"    pip install mitmproxy",
             )
             return
-        self._sync(running)
+        sysproxy.enable()
+        self._sync(True)
 
     def _edit_rules(self, _: rumps.MenuItem) -> None:
         try:
@@ -78,6 +85,7 @@ class PproxyTray(rumps.App):
 
     def _quit(self, _: rumps.MenuItem) -> None:
         self._proxy.stop()
+        sysproxy.disable()
         rumps.quit_application()
 
     # ── State ──────────────────────────────────────────────
