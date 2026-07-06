@@ -2,7 +2,13 @@ from models import Rule, MockResponse
 from engine import RuleEngine
 from cors import build_cors_headers
 from loaders.json_loader import JsonLoader
-from loaders.yaml_loader import YamlLoader
+
+try:
+    # YAML support is optional — the JSON path needs no pyyaml, and some
+    # bundled Python runtimes (e.g. Homebrew mitmproxy's) ship without it.
+    from loaders.yaml_loader import YamlLoader
+except ImportError:
+    YamlLoader = None  # type: ignore[assignment, misc]
 
 try:
     from adapters.mitmproxy import MitmproxyAddon
