@@ -17,9 +17,6 @@ dev = [
     "pytest>=7.0",
     "mypy>=1.0",
 ]
-tray = [
-    "rumps>=0.4; sys_platform == 'darwin'",
-]
 
 [tool.setuptools.packages.find]
 include = ["pproxy*"]

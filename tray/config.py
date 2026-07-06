@@ -2,13 +2,10 @@ import json
 import os
 from pathlib import Path
 
+from tray.paths import config_path
+
 DEFAULT_EDITOR = "code"
 """The editor command used when nothing else is configured (VS Code)."""
-
-
-def _default_config_path() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
-    return Path(base) / "pproxy" / "config.json"
 
 
 class Config:
@@ -29,7 +26,7 @@ class Config:
     """
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self._path = Path(path) if path is not None else _default_config_path()
+        self._path = Path(path) if path is not None else config_path()
         self._data = self._read()
 
     def _read(self) -> dict:
