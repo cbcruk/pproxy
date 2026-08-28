@@ -37,7 +37,7 @@ def create_addon(rules_path: str = "rules.json") -> "MitmproxyAddon":
     if MitmproxyAddon is None:
         raise ImportError(
             "mitmproxy is required to create an addon. "
-            "Install it with: pip install mitmproxy"
+            'Install it with: pip install "pproxy[proxy]"'
         )
     engine = RuleEngine()
     loader = JsonLoader(rules_path, engine)
@@ -49,6 +49,7 @@ __all__ = [
     "Rule",
     "MockResponse",
     "RuleEngine",
+    "build_cors_headers",
     "JsonLoader",
     "YamlLoader",
     "MitmproxyAddon",

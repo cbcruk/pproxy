@@ -6,7 +6,17 @@ URL pattern-based response interception, testable independently without mitmprox
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
+```
+
+mitmproxy is an optional dependency. Install the `proxy` extra to run the
+addon; the rule engine itself works without it.
+
+```bash
+pip install -e ".[proxy]"
+
+# development
+pip install -e ".[proxy,dev]"
 ```
 
 ## Usage

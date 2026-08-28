@@ -8,11 +8,13 @@ version = "0.1.0"
 description = "Poorman's proxy — URL pattern-based HTTP response interceptor for mitmproxy"
 requires-python = ">=3.11"
 dependencies = [
-    "mitmproxy>=10.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+proxy = [
+    "mitmproxy>=10.0",
+]
 dev = [
     "pytest>=7.0",
     "mypy>=1.0",
