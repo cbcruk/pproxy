@@ -26,6 +26,11 @@ class RuleEngine:
         self._rules: list[Rule] = []
         self._hooks: list[InterceptHook] = []
 
+    @property
+    def rules(self) -> list[Rule]:
+        """The registered rules, in evaluation order."""
+        return list(self._rules)
+
     # ── Rule registration ──────────────────────────────────
 
     def add_rule(self, rule: Rule) -> "RuleEngine":

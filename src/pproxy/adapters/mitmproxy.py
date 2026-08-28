@@ -4,8 +4,8 @@ import time
 from mitmproxy import http
 
 from ..engine import RuleEngine
-from cors import build_cors_headers
-from loaders.json_loader import JsonLoader
+from ..cors import build_cors_headers
+from ..loaders.base import BaseLoader
 
 logger = logging.getLogger("pproxy")
 
@@ -21,7 +21,7 @@ class MitmproxyAddon:
         loader: Optional loader for hot-reloading rules on each request.
     """
 
-    def __init__(self, engine: RuleEngine, loader: JsonLoader | None = None) -> None:
+    def __init__(self, engine: RuleEngine, loader: BaseLoader | None = None) -> None:
         self._engine = engine
         self._loader = loader
 
