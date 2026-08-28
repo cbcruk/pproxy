@@ -3,8 +3,8 @@ from pathlib import Path
 
 import yaml
 
-from loaders.base import BaseLoader
-from engine import RuleEngine
+from .base import BaseLoader
+from ..engine import RuleEngine
 
 logger = logging.getLogger("pproxy")
 

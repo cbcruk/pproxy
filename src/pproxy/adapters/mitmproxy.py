@@ -3,7 +3,7 @@ import time
 
 from mitmproxy import http
 
-from engine import RuleEngine
+from ..engine import RuleEngine
 from cors import build_cors_headers
 from loaders.json_loader import JsonLoader
 

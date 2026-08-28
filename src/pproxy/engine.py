@@ -2,8 +2,8 @@ import json
 import logging
 from typing import Any, Callable
 
-from models import Rule, MockResponse
-from matching import get_matcher
+from .models import Rule, MockResponse
+from .matching import get_matcher
 
 logger = logging.getLogger("pproxy")
 
