@@ -21,8 +21,8 @@ from pathlib import Path
 
 # ── Locate the project and make `tray` importable ──────────
 _HOME = Path(os.environ.get("PPROXY_HOME") or Path(__file__).resolve().parent.parent)
-if str(_HOME) not in sys.path:
-    sys.path.insert(0, str(_HOME))
+if str(_HOME / "src") not in sys.path:
+    sys.path.insert(0, str(_HOME / "src"))
 
 from tray import sysproxy  # noqa: E402
 from tray.config import Config  # noqa: E402
