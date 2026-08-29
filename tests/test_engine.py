@@ -1,5 +1,5 @@
-from engine import RuleEngine
-from models import Rule, MockResponse
+from pproxy.engine import RuleEngine
+from pproxy.models import Rule, MockResponse
 
 
 class TestRuleRegistration:

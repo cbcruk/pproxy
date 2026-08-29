@@ -6,7 +6,17 @@ URL pattern-based response interception, testable independently without mitmprox
 ## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install -e .
+```
+
+mitmproxy is an optional dependency. Install the `proxy` extra to run the
+addon; the rule engine itself works without it.
+
+```bash
+pip install -e ".[proxy]"
+
+# development
+pip install -e ".[proxy,dev]"
 ```
 
 ## Usage
@@ -116,16 +126,41 @@ engine.add_hook(log_intercept)
 
 ## Running the proxy
 
-The repo ships an `intercept.py` entry point that loads `rules.json`:
+### CLI
+
+```bash
+pproxy run rules.yaml
+pproxy run rules.json --host 0.0.0.0 --port 9090 --verbose
+```
+
+`run` picks the loader from the file extension (`.json`, `.yaml`, `.yml`),
+hot-reloads the file while running, and listens on `127.0.0.1:8080` by default.
+
+Validate a rules file without starting the proxy:
+
+```bash
+pproxy check rules.yaml
+```
+
+```
+  glob  */api/users/* → 200 (users)
+  regex /orders/\d+ → 201
+2 rules OK
+```
+
+`check` exits non-zero on a missing file, a parse error, a rule without
+`url_pattern`, or an unknown matcher.
+
+### mitmproxy directly
+
+The repo also ships an `intercept.py` entry point that loads `rules.json`:
 
 ```bash
 mitmdump -s intercept.py      # headless
 mitmweb  -s intercept.py      # with mitmproxy's web UI
 ```
 
-`intercept.py` adds the project directory to `sys.path` (the layout is
-flat) and builds the addon with `create_addon("rules.json")`, so it runs
-straight from a checkout without installation.
+`intercept.py` builds the addon with `create_addon("rules.json")`.
 
 > **Glob patterns and query strings.** The `glob` matcher is a full
 > `fnmatch`, so a pattern without a trailing wildcard only matches the

@@ -1,6 +1,6 @@
 import pytest
 
-from matching import GlobMatcher, RegexMatcher, ExactMatcher, get_matcher
+from pproxy.matching import GlobMatcher, RegexMatcher, ExactMatcher, get_matcher
 
 
 class TestGlobMatcher:

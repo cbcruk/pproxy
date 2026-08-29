@@ -1,4 +1,4 @@
-from cors import build_cors_headers
+from pproxy.cors import build_cors_headers
 
 
 class TestBuildCorsHeaders:

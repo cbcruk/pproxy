@@ -1,4 +1,4 @@
-from models import Rule, MockResponse
+from pproxy.models import Rule, MockResponse
 
 
 class TestMockResponse:

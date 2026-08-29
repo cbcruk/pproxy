@@ -2,8 +2,8 @@ import json
 import logging
 from pathlib import Path
 
-from loaders.base import BaseLoader
-from engine import RuleEngine
+from .base import BaseLoader
+from ..engine import RuleEngine
 
 logger = logging.getLogger("pproxy")
 

@@ -2,8 +2,8 @@ import json
 import logging
 from typing import Any, Callable
 
-from models import Rule, MockResponse
-from matching import get_matcher
+from .models import Rule, MockResponse
+from .matching import get_matcher
 
 logger = logging.getLogger("pproxy")
 
@@ -25,6 +25,11 @@ class RuleEngine:
     def __init__(self) -> None:
         self._rules: list[Rule] = []
         self._hooks: list[InterceptHook] = []
+
+    @property
+    def rules(self) -> list[Rule]:
+        """The registered rules, in evaluation order."""
+        return list(self._rules)
 
     # ── Rule registration ──────────────────────────────────
 

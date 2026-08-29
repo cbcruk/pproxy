@@ -1,17 +1,17 @@
-from models import Rule, MockResponse
-from engine import RuleEngine
-from cors import build_cors_headers
-from loaders.json_loader import JsonLoader
+from .models import Rule, MockResponse
+from .engine import RuleEngine
+from .cors import build_cors_headers
+from .loaders.json_loader import JsonLoader
 
 try:
     # YAML support is optional — the JSON path needs no pyyaml, and some
     # bundled Python runtimes (e.g. Homebrew mitmproxy's) ship without it.
-    from loaders.yaml_loader import YamlLoader
+    from .loaders.yaml_loader import YamlLoader
 except ImportError:
     YamlLoader = None  # type: ignore[assignment, misc]
 
 try:
-    from adapters.mitmproxy import MitmproxyAddon
+    from .adapters.mitmproxy import MitmproxyAddon
 except ImportError:
     MitmproxyAddon = None  # type: ignore[assignment, misc]
 
@@ -37,7 +37,7 @@ def create_addon(rules_path: str = "rules.json") -> "MitmproxyAddon":
     if MitmproxyAddon is None:
         raise ImportError(
             "mitmproxy is required to create an addon. "
-            "Install it with: pip install mitmproxy"
+            'Install it with: pip install "pproxy[proxy]"'
         )
     engine = RuleEngine()
     loader = JsonLoader(rules_path, engine)
@@ -49,6 +49,7 @@ __all__ = [
     "Rule",
     "MockResponse",
     "RuleEngine",
+    "build_cors_headers",
     "JsonLoader",
     "YamlLoader",
     "MitmproxyAddon",
