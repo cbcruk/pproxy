@@ -1,4 +1,5 @@
-from pproxy.models import Rule, MockResponse
+from pproxy.graphql import GraphQLCondition
+from pproxy.models import Rule, MockResponse, Request
 
 
 class TestMockResponse:
@@ -56,3 +57,29 @@ class TestRule:
         assert rule.response.headers == {"x-test": "yes"}
         assert rule.response.content_type == "text/plain"
         assert rule.response.delay_ms == 1000
+
+
+class TestRequest:
+    def test_defaults(self):
+        request = Request(url="https://example.com/api")
+        assert request.method == "GET"
+        assert request.headers == {}
+        assert request.body == b""
+
+
+class TestRuleGraphQL:
+    def test_absent_by_default(self):
+        assert Rule.from_dict({"url_pattern": "*/graphql"}).graphql is None
+
+    def test_from_dict(self):
+        rule = Rule.from_dict({
+            "url_pattern": "*/graphql",
+            "graphql": {"operation_name": "GetUser", "variables": {"id": "42"}},
+        })
+        assert rule.graphql == GraphQLCondition(
+            operation_name="GetUser", variables={"id": "42"}
+        )
+
+    def test_from_dict_empty_block_matches_any_operation(self):
+        rule = Rule.from_dict({"url_pattern": "*/graphql", "graphql": {}})
+        assert rule.graphql == GraphQLCondition()

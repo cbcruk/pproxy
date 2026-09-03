@@ -1,9 +1,11 @@
+import inspect
 import json
 import logging
 from typing import Any, Callable
 
-from .models import Rule, MockResponse
+from .models import Rule, MockResponse, Request
 from .matching import get_matcher
+from .graphql import GraphQLCondition, GraphQLRequest, parse_graphql
 
 logger = logging.getLogger("pproxy")
 
@@ -77,6 +79,7 @@ class RuleEngine:
         status_code: int = 200,
         matcher: str = "glob",
         content_type: str = "application/json",
+        graphql: GraphQLCondition | dict | None = None,
     ):
         """Decorator that registers a rule with a dynamic response body.
 
@@ -84,11 +87,16 @@ class RuleEngine:
         response body. This is useful when the response depends on the
         request URL (e.g. extracting query parameters).
 
+        A function declaring a second parameter also receives the parsed
+        GraphQL request, so the mock can read the operation's variables.
+
         Args:
             pattern: URL pattern string.
             status_code: HTTP status code for the response.
             matcher: Matching strategy — "glob", "regex", or "exact".
             content_type: MIME type for the Content-Type header.
+            graphql: Optional GraphQL condition, as a GraphQLCondition or the
+                dict form used in rules files.
 
         Example::
 
@@ -96,13 +104,22 @@ class RuleEngine:
             def handle_search(url: str) -> dict:
                 query = url.split("q=")[-1]
                 return {"results": [], "query": query}
-        """
 
-        def decorator(fn: Callable[[str], Any]):
+        Example::
+
+            @engine.intercept("*/graphql", graphql={"operation_name": "GetUser"})
+            def handle_user(url: str, gql: GraphQLRequest) -> dict:
+                return {"data": {"user": {"id": gql.variables["id"]}}}
+        """
+        if isinstance(graphql, dict):
+            graphql = GraphQLCondition.from_dict(graphql)
+
+        def decorator(fn: Callable[..., Any]):
             rule = Rule(
                 pattern=pattern,
                 matcher=matcher,
                 name=fn.__name__,
+                graphql=graphql,
                 response=MockResponse(
                     status_code=status_code,
                     content_type=content_type,
@@ -111,6 +128,7 @@ class RuleEngine:
                 ),
             )
             rule._body_fn = fn  # type: ignore[attr-defined]
+            rule._body_fn_arity = len(inspect.signature(fn).parameters)  # type: ignore[attr-defined]
             self._rules.append(rule)
             return fn
 
@@ -118,38 +136,70 @@ class RuleEngine:
 
     # ── Matching ───────────────────────────────────────────
 
-    def match(self, url: str) -> MockResponse | None:
-        """Find the first rule matching the URL and return its response.
+    def match(self, request: str | Request) -> MockResponse | None:
+        """Find the first rule matching the request and return its response.
 
-        Iterates through rules in registration order. On the first match,
-        all registered hooks are called, then the response is returned.
-        If no rule matches, returns None (the request should pass through
-        to the real server).
+        Iterates through rules in registration order. A rule matches when its
+        URL pattern matches and, for rules carrying a GraphQL condition, the
+        request body parses as a GraphQL operation satisfying that condition.
+        On the first match, all registered hooks are called, then the response
+        is returned. If no rule matches, returns None (the request should pass
+        through to the real server).
+
+        The body is parsed at most once per call, and only when some rule
+        actually asks for it.
 
         Args:
-            url: The full request URL to match against.
+            request: The request to match. A bare string is treated as a URL,
+                which is all a rule without a GraphQL condition looks at.
 
         Returns:
             A MockResponse if a rule matched, or None for pass-through.
         """
+        if isinstance(request, str):
+            request = Request(url=request)
+
+        graphql_request: GraphQLRequest | None = None
+        parsed = False
+
         for rule in self._rules:
             matcher = get_matcher(rule.matcher)
-            if matcher.match(url, rule.pattern):
-                for hook in self._hooks:
-                    hook(url, rule)
-                return self._resolve_response(rule, url)
+            if not matcher.match(request.url, rule.pattern):
+                continue
+
+            if rule.graphql is not None:
+                if not parsed:
+                    graphql_request = parse_graphql(request.body)
+                    parsed = True
+                if graphql_request is None or not rule.graphql.matches(graphql_request):
+                    continue
+
+            for hook in self._hooks:
+                hook(request.url, rule)
+            return self._resolve_response(rule, request, graphql_request)
         return None
 
-    def _resolve_response(self, rule: Rule, url: str) -> MockResponse:
+    def _resolve_response(
+        self,
+        rule: Rule,
+        request: Request,
+        graphql_request: GraphQLRequest | None,
+    ) -> MockResponse:
         body_fn = getattr(rule, "_body_fn", None)
-        if body_fn is not None:
-            return MockResponse(
-                status_code=rule.response.status_code,
-                body=body_fn(url),
-                headers=rule.response.headers,
-                content_type=rule.response.content_type,
-            )
-        return rule.response
+        if body_fn is None:
+            return rule.response
+
+        if getattr(rule, "_body_fn_arity", 1) > 1:
+            body = body_fn(request.url, graphql_request)
+        else:
+            body = body_fn(request.url)
+
+        return MockResponse(
+            status_code=rule.response.status_code,
+            body=body,
+            headers=rule.response.headers,
+            content_type=rule.response.content_type,
+        )
 
     # ── Serialization ──────────────────────────────────────
 

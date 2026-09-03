@@ -6,6 +6,7 @@ from mitmproxy import http
 from ..engine import RuleEngine
 from ..cors import build_cors_headers
 from ..loaders.base import BaseLoader
+from ..models import Request
 
 logger = logging.getLogger("pproxy")
 
@@ -31,7 +32,7 @@ class MitmproxyAddon:
         Handles three cases in order:
             1. Hot-reloads rules if a loader is configured.
             2. Responds to OPTIONS preflight requests with CORS headers.
-            3. Matches the URL against rules and returns a mock response,
+            3. Matches the request against rules and returns a mock response,
                or does nothing (pass-through to real server).
 
         Args:
@@ -47,7 +48,14 @@ class MitmproxyAddon:
             return
 
         url = flow.request.pretty_url
-        mock = self._engine.match(url)
+        mock = self._engine.match(
+            Request(
+                url=url,
+                method=flow.request.method,
+                headers=dict(flow.request.headers),
+                body=flow.request.content or b"",
+            )
+        )
 
         if mock is not None:
             if mock.delay_ms > 0:

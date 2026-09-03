@@ -129,8 +129,9 @@ def check_command(args: argparse.Namespace) -> int:
             failed = True
             continue
         label = f" ({rule.name})" if rule.name else ""
+        condition = f" graphql:{rule.graphql.describe()}" if rule.graphql else ""
         print(
-            f"  {rule.matcher:<5} {rule.pattern}"
+            f"  {rule.matcher:<5} {rule.pattern}{condition}"
             f" → {rule.response.status_code}{label}"
         )
 
