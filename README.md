@@ -85,6 +85,70 @@ def handle_search(url: str) -> dict:
     return {"results": [], "query": query}
 ```
 
+### GraphQL
+
+GraphQL sends every operation to the same endpoint, so a URL pattern alone
+cannot tell `GetUser` from `GetPosts`. Add a `graphql` block and the rule
+matches only when the request body carries that operation.
+
+```json
+[
+  {
+    "name": "user_detail",
+    "url_pattern": "*/graphql",
+    "graphql": { "operation_name": "GetUser" },
+    "status_code": 200,
+    "body": { "data": { "user": { "id": "1", "name": "mock" } } }
+  }
+]
+```
+
+`variables` narrows a rule further. It is compared as a subset, so only the
+listed keys have to match — put the specific rule first, since the first match
+wins.
+
+```json
+[
+  {
+    "url_pattern": "*/graphql",
+    "graphql": { "operation_name": "GetUser", "variables": { "id": "42" } },
+    "body": { "data": { "user": { "id": "42" } } }
+  },
+  {
+    "url_pattern": "*/graphql",
+    "graphql": { "operation_name": "GetUser" },
+    "body": { "errors": [{ "message": "not found" }] }
+  }
+]
+```
+
+`operation_name` is optional — an empty `"graphql": {}` block matches any
+GraphQL operation on that URL. When a client omits `operationName`, the name
+is recovered from the query text, so only truly anonymous operations
+(`{ viewer { id } }`) match on an empty condition alone.
+
+A decorated function that declares a second parameter receives the parsed
+request, which is how a mock reads the operation's variables.
+
+```python
+from pproxy import GraphQLRequest
+
+@engine.intercept("*/graphql", graphql={"operation_name": "GetUser"})
+def handle_user(url: str, gql: GraphQLRequest) -> dict:
+    return {"data": {"user": {"id": gql.variables["id"]}}}
+```
+
+GraphQL reports errors with HTTP 200 and an `errors` array, so mock a failure
+by setting `body` rather than `status_code`.
+
+Only the `application/json` POST form is recognized. These fall through to the
+real server untouched:
+
+- batched requests (a JSON array of operations)
+- `GET` requests carrying the query in the query string
+- `application/graphql` bodies and multipart file uploads
+- persisted queries (APQ) that send only a hash, with no query text
+
 ### Response delay simulation
 
 Set `delay_ms` to simulate slow APIs.

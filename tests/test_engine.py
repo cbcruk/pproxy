@@ -1,5 +1,7 @@
+import json
+
 from pproxy.engine import RuleEngine
-from pproxy.models import Rule, MockResponse
+from pproxy.models import Rule, MockResponse, Request
 
 
 class TestRuleRegistration:
@@ -170,3 +172,113 @@ class TestSerializeBody:
     def test_unicode_body(self):
         r = MockResponse(body={"name": "홍길동"})
         assert "홍길동" in self.engine.serialize_body(r).decode("utf-8")
+
+
+class TestGraphQLMatching:
+    def setup_method(self):
+        self.engine = RuleEngine().load([
+            {
+                "name": "user",
+                "url_pattern": "*/graphql",
+                "graphql": {"operation_name": "GetUser"},
+                "body": {"data": {"user": {"id": "1"}}},
+            },
+            {
+                "name": "posts",
+                "url_pattern": "*/graphql",
+                "graphql": {"operation_name": "GetPosts"},
+                "body": {"data": {"posts": []}},
+            },
+        ])
+
+    def request(self, payload: dict) -> Request:
+        return Request(
+            url="https://example.com/graphql",
+            method="POST",
+            body=json.dumps(payload).encode(),
+        )
+
+    def test_picks_the_rule_for_the_operation(self):
+        result = self.engine.match(self.request({
+            "operationName": "GetPosts",
+            "query": "query GetPosts { posts { id } }",
+        }))
+        assert result.body == {"data": {"posts": []}}
+
+    def test_unknown_operation_passes_through(self):
+        assert self.engine.match(self.request({
+            "operationName": "GetComments",
+            "query": "query GetComments { comments { id } }",
+        })) is None
+
+    def test_non_graphql_body_passes_through(self):
+        assert self.engine.match(Request(
+            url="https://example.com/graphql",
+            method="POST",
+            body=b"not json",
+        )) is None
+
+    def test_url_only_request_passes_through(self):
+        assert self.engine.match("https://example.com/graphql") is None
+
+    def test_variables_narrow_the_match(self):
+        engine = RuleEngine().load([
+            {
+                "url_pattern": "*/graphql",
+                "graphql": {"operation_name": "GetUser", "variables": {"id": "42"}},
+                "body": {"data": {"user": {"id": "42"}}},
+            },
+            {
+                "url_pattern": "*/graphql",
+                "graphql": {"operation_name": "GetUser"},
+                "status_code": 404,
+                "body": {"errors": [{"message": "not found"}]},
+            },
+        ])
+        query = "query GetUser($id: ID!) { user(id: $id) { id } }"
+
+        hit = engine.match(Request(
+            url="https://example.com/graphql",
+            body=json.dumps({"query": query, "variables": {"id": "42"}}).encode(),
+        ))
+        assert hit.body == {"data": {"user": {"id": "42"}}}
+
+        miss = engine.match(Request(
+            url="https://example.com/graphql",
+            body=json.dumps({"query": query, "variables": {"id": "7"}}).encode(),
+        ))
+        assert miss.status_code == 404
+
+    def test_url_rule_without_condition_still_wins_by_order(self):
+        engine = RuleEngine().load([
+            {"url_pattern": "*/graphql", "body": {"data": None}},
+            {
+                "url_pattern": "*/graphql",
+                "graphql": {"operation_name": "GetUser"},
+                "body": {"data": {"user": {"id": "1"}}},
+            },
+        ])
+        result = engine.match(self.request({"query": "query GetUser { user { id } }"}))
+        assert result.body == {"data": None}
+
+    def test_hook_receives_the_url(self):
+        calls = []
+        self.engine.add_hook(lambda url, rule: calls.append((url, rule.name)))
+        self.engine.match(self.request({"query": "query GetUser { user { id } }"}))
+        assert calls == [("https://example.com/graphql", "user")]
+
+    def test_decorator_reads_variables(self):
+        engine = RuleEngine()
+
+        @engine.intercept("*/graphql", graphql={"operation_name": "GetUser"})
+        def handle_user(url: str, gql) -> dict:
+            return {"data": {"user": {"id": gql.variables["id"]}}}
+
+        result = engine.match(Request(
+            url="https://example.com/graphql",
+            body=json.dumps({
+                "query": "query GetUser($id: ID!) { user(id: $id) { id } }",
+                "variables": {"id": "99"},
+            }).encode(),
+        ))
+        assert result.body == {"data": {"user": {"id": "99"}}}

@@ -83,6 +83,16 @@ class TestCheckCommand:
         assert "(order)" in out
         assert "2 rules OK" in out
 
+    def test_graphql_condition_is_shown(self, tmp_path, capsys):
+        path = tmp_path / "rules.json"
+        path.write_text(json.dumps([{
+            "url_pattern": "*/graphql",
+            "graphql": {"operation_name": "GetUser", "variables": {"id": "42"}},
+        }]))
+        assert main(["check", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert 'graphql:GetUser {"id": "42"}' in out
+
     def test_unknown_matcher(self, tmp_path, capsys):
         path = tmp_path / "rules.json"
         path.write_text(json.dumps([{"url_pattern": "*", "matcher": "nope"}]))

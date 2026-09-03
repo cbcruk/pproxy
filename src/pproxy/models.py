@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from .graphql import GraphQLCondition
+
 
 @dataclass
 class MockResponse:
@@ -24,6 +26,27 @@ class MockResponse:
 
 
 @dataclass
+class Request:
+    """An incoming HTTP request, in engine-native types.
+
+    The adapter builds this from its own framework's request object so the
+    engine never depends on mitmproxy. Rules that only look at the URL work
+    with the defaults for every other field.
+
+    Attributes:
+        url: The full request URL.
+        method: The HTTP method, uppercase.
+        headers: The request headers, lowercase keys.
+        body: The raw request body. Empty for requests without one.
+    """
+
+    url: str
+    method: str = "GET"
+    headers: dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+
+
+@dataclass
 class Rule:
     """A single URL interception rule.
 
@@ -36,12 +59,16 @@ class Rule:
         response: The mock response to return when this rule matches.
         matcher: Matching strategy — "glob" (fnmatch), "regex", or "exact".
         name: Optional label for debugging and logging.
+        graphql: Optional condition on the GraphQL request body. When set, the
+            URL pattern and the condition must both match, which is how several
+            rules can share one ``/graphql`` endpoint.
     """
 
     pattern: str
     response: MockResponse
     matcher: str = "glob"
     name: str = ""
+    graphql: GraphQLCondition | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "Rule":
@@ -56,6 +83,8 @@ class Rule:
             - ``headers``: Extra response headers. Defaults to ``{}``.
             - ``content_type``: MIME type. Defaults to "application/json".
             - ``delay_ms``: Response delay in ms. Defaults to 0.
+            - ``graphql``: Optional ``{"operation_name": ..., "variables": ...}``
+              block matched against the request body.
 
         Args:
             data: A dictionary with the keys described above.
@@ -63,10 +92,12 @@ class Rule:
         Returns:
             A new Rule instance.
         """
+        graphql = data.get("graphql")
         return cls(
             pattern=data["url_pattern"],
             matcher=data.get("matcher", "glob"),
             name=data.get("name", ""),
+            graphql=GraphQLCondition.from_dict(graphql) if graphql is not None else None,
             response=MockResponse(
                 status_code=data.get("status_code", 200),
                 body=data.get("body", {}),

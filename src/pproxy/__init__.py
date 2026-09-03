@@ -1,5 +1,6 @@
-from .models import Rule, MockResponse
+from .models import Rule, MockResponse, Request
 from .engine import RuleEngine
+from .graphql import GraphQLCondition, GraphQLRequest, parse_graphql
 from .cors import build_cors_headers
 from .loaders.json_loader import JsonLoader
 
@@ -48,7 +49,11 @@ def create_addon(rules_path: str = "rules.json") -> "MitmproxyAddon":
 __all__ = [
     "Rule",
     "MockResponse",
+    "Request",
     "RuleEngine",
+    "GraphQLCondition",
+    "GraphQLRequest",
+    "parse_graphql",
     "build_cors_headers",
     "JsonLoader",
     "YamlLoader",
