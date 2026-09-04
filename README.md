@@ -3,6 +3,12 @@
 A rewrite of the mitmproxy addon as a general-purpose library.
 URL pattern-based response interception, testable independently without mitmproxy.
 
+There are two interchangeable implementations. This one runs on Python and
+mitmproxy; [`node/`](node/README.md) runs on Node and
+[mockttp](https://github.com/httptoolkit/mockttp). **Both read the same rules
+file** — it is the contract between them — so you can switch backends without
+rewriting a single rule. See [Choosing a backend](#choosing-a-backend).
+
 ## Installation
 
 ```bash
@@ -226,16 +232,45 @@ mitmweb  -s intercept.py      # with mitmproxy's web UI
 
 `intercept.py` builds the addon with `create_addon("rules.json")`.
 
+### Node
+
+The same rules run under the Node package, which needs no Python and
+generates its own CA:
+
+```bash
+cd node && npm install && npm run build && npm link
+pproxy run ../rules.json
+pproxy cert install     # trust the CA once (macOS)
+```
+
+Full details in [`node/README.md`](node/README.md).
+
 > **Glob patterns and query strings.** The `glob` matcher is a full
 > `fnmatch`, so a pattern without a trailing wildcard only matches the
 > exact URL. To match real requests that carry a query string, end the
 > pattern with `*` — e.g. `*/api/exam-rooms*` matches
 > `…/api/exam-rooms?hospitalNo=42`.
 
-> **HTTPS interception.** To intercept HTTPS you must trust mitmproxy's CA
-> certificate once. Start the proxy, visit <http://mitm.it>, and follow
-> the macOS instructions (add the cert to the System keychain and mark it
-> trusted). Without this, HTTPS requests fail instead of being mocked.
+> **HTTPS interception.** To intercept HTTPS you must trust the proxy's CA
+> certificate once, or HTTPS requests fail instead of being mocked. Under
+> mitmproxy: start the proxy, visit <http://mitm.it>, and follow the macOS
+> instructions (add the cert to the System keychain and mark it trusted).
+> Under Node: `pproxy cert install`.
+
+## Choosing a backend
+
+|                                      | Python (mitmproxy)             | Node (mockttp)          |
+| ------------------------------------ | ------------------------------ | ----------------------- |
+| Install                              | `pip install -e ".[proxy]"`    | `npm install`           |
+| Traffic inspector UI                 | **`mitmweb -s intercept.py`**  | —                       |
+| Transparent / WireGuard capture      | **yes**                        | —                       |
+| Trusting the CA                      | mitm.it, by hand               | `pproxy cert install`   |
+| CORS, HTTP/2, WebSockets             | yes                            | yes                     |
+| Connection faults (reset/hang/close) | —                              | available in mockttp    |
+
+Reach for Python when you want to *watch* traffic in mitmweb or capture from
+a phone. Reach for Node when you want the proxy on a machine without a Python
+environment, or a CA you can trust from a script.
 
 ## Menu bar (SwiftBar plugin, macOS)
 
@@ -255,14 +290,17 @@ The plugin finds the project via its own real path (so the symlink still
 locates `intercept.py` and `rules.json`), or via the `PPROXY_HOME`
 environment variable. The menu offers:
 
-- **Start / Stop proxy** — starts `mitmdump -s intercept.py` as a
-  detached process (tracked by a pidfile in `~/.config/pproxy/`), points
-  the macOS system proxy at `127.0.0.1:8080`, and shows the running state
-  (🟢 / ⚪️) in the menu bar. Stopping clears the system proxy so normal
-  internet access is restored.
+- **Start / Stop proxy** — starts the configured backend as a detached
+  process (tracked by a pidfile in `~/.config/pproxy/`), points the macOS
+  system proxy at `127.0.0.1:8080`, and shows the running state (🟢 / ⚪️)
+  in the menu bar. Stopping clears the system proxy so normal internet
+  access is restored.
 - **Edit rules…** — opens the rules file in your editor. Because the
   proxy hot-reloads that file (`JsonLoader.reload_if_changed`), edits go
   live on the next intercepted request — no restart.
+- **Switch backend** — swaps between `mitmdump -s intercept.py` and
+  `pproxy run rules.json`, restarting the proxy if it was running. Both
+  read the same `rules.json`, so nothing else changes.
 - **Log** — opens the proxy's output log.
 
 System-proxy changes use `networksetup` on the auto-detected active
@@ -270,15 +308,22 @@ network service (Wi-Fi, etc.) and are *fail-soft*: if that can't be done,
 it's logged and the proxy still runs — point your client at
 `127.0.0.1:8080` manually.
 
-The editor defaults to VS Code (`code`). Override it, in order of
-precedence:
+Settings live in `~/.config/pproxy/config.json`, and each one can be
+overridden by an environment variable:
 
-1. the `PPROXY_EDITOR` environment variable, or
-2. the `editor` key in `~/.config/pproxy/config.json`.
+| Setting         | Environment variable | Default      | Meaning                                   |
+| --------------- | -------------------- | ------------ | ----------------------------------------- |
+| `editor`        | `PPROXY_EDITOR`      | `code`       | editor for **Edit rules…**                |
+| `backend`       | `PPROXY_BACKEND`     | `mitmproxy`  | `mitmproxy` or `node`                     |
+| `proxy_command` | `PPROXY_COMMAND`     | per backend  | override the executable that gets spawned |
 
 ```bash
-PPROXY_EDITOR="subl" ...   # use Sublime Text instead
+PPROXY_EDITOR="subl" ...    # use Sublime Text instead
+PPROXY_BACKEND=node ...     # start the Node proxy
 ```
+
+An unrecognized `backend` falls back to the default rather than raising, so
+a typo in the config file cannot stop the menu bar from working.
 
 The plugin is macOS-only (SwiftBar and `networksetup`). On other
 platforms, drive the proxy directly with `mitmdump`/`mitmweb` as shown
@@ -301,4 +346,10 @@ def test_glob_match():
     }])
     assert engine.match("https://example.com/api/users") is not None
     assert engine.match("https://example.com/health") is None
+```
+
+The Node package has its own suite, including tests that drive a live proxy:
+
+```bash
+cd node && npm test
 ```

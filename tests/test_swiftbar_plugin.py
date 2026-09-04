@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -42,6 +43,10 @@ class TestRender:
         assert "param2=\"start\"" in out
         assert str(PLUGIN) in out         # actions point back at the plugin
 
+    def test_shows_the_configured_backend(self, tmp_path):
+        assert "Backend: mitmproxy" in run_plugin([], tmp_path).stdout
+        assert "Backend: node" in run_plugin([], tmp_path, PPROXY_BACKEND="node").stdout
+
 
 @pytest.mark.skipif(not PLUGIN.exists(), reason="plugin not present")
 class TestActions:
@@ -55,3 +60,24 @@ class TestActions:
         result = run_plugin(["bogus"], tmp_path)
         assert result.returncode == 0
         assert "pproxy" in result.stdout
+
+
+@pytest.mark.skipif(not PLUGIN.exists(), reason="plugin not present")
+class TestBackendSwitch:
+    def _config(self, tmp_path):
+        path = tmp_path / "pproxy" / "config.json"
+        return json.loads(path.read_text()) if path.exists() else {}
+
+    def test_switches_and_persists(self, tmp_path):
+        result = run_plugin(["backend"], tmp_path)
+        assert result.returncode == 0
+        assert self._config(tmp_path)["backend"] == "node"
+
+    def test_switch_is_reflected_in_the_menu(self, tmp_path):
+        run_plugin(["backend"], tmp_path)
+        assert "Backend: node" in run_plugin([], tmp_path).stdout
+
+    def test_switching_twice_returns_to_the_start(self, tmp_path):
+        run_plugin(["backend"], tmp_path)
+        run_plugin(["backend"], tmp_path)
+        assert self._config(tmp_path)["backend"] == "mitmproxy"

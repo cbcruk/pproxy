@@ -13,6 +13,10 @@ Install by symlinking it into your SwiftBar plugin folder::
 The script resolves the project directory from its own real path (so a
 symlink still finds ``intercept.py`` and ``rules.json``), or from the
 ``PPROXY_HOME`` environment variable if set.
+
+Which proxy it starts — the mitmproxy addon or the Node one — comes from
+``Config.backend``; both read the same ``rules.json``, so switching only
+changes what is spawned.
 """
 
 import os
@@ -25,15 +29,27 @@ if str(_HOME / "src") not in sys.path:
     sys.path.insert(0, str(_HOME / "src"))
 
 from tray import sysproxy  # noqa: E402
-from tray.config import Config  # noqa: E402
+from tray.config import BACKENDS, Config  # noqa: E402
 from tray.daemon import ProxyDaemon  # noqa: E402
 from tray.editor import EditorError, open_in_editor  # noqa: E402
 
 SCRIPT = _HOME / "intercept.py"
 RULES = _HOME / "rules.json"
 
-_daemon = ProxyDaemon(SCRIPT)
+
+def build_daemon(config: Config) -> ProxyDaemon:
+    """The daemon for the configured backend.
+
+    Both backends share the pidfile, so a proxy started under one is still
+    stopped correctly after switching to the other.
+    """
+    if config.backend == "node":
+        return ProxyDaemon.node(RULES, config.proxy_command)
+    return ProxyDaemon.mitmproxy(SCRIPT, config.proxy_command)
+
+
 _config = Config()
+_daemon = build_daemon(_config)
 
 
 # ── Actions (invoked on click) ─────────────────────────────
@@ -42,7 +58,7 @@ def _start() -> None:
     try:
         _daemon.start()
     except FileNotFoundError:
-        return  # mitmdump not installed; surfaced as "stopped" in the menu
+        return  # proxy not installed; surfaced as "stopped" in the menu
     sysproxy.enable()
 
 
@@ -58,7 +74,21 @@ def _edit() -> None:
         pass
 
 
-_ACTIONS = {"start": _start, "stop": _stop, "edit": _edit}
+def _switch_backend() -> None:
+    """Switch to the other backend, restarting the proxy if it is running."""
+    was_running = _daemon.is_running()
+    if was_running:
+        _stop()
+
+    other = BACKENDS[(BACKENDS.index(_config.backend) + 1) % len(BACKENDS)]
+    _config.set_backend(other)
+
+    if was_running:
+        globals()["_daemon"] = build_daemon(Config())
+        _start()
+
+
+_ACTIONS = {"start": _start, "stop": _stop, "edit": _edit, "backend": _switch_backend}
 
 
 # ── Menu rendering ─────────────────────────────────────────
@@ -88,6 +118,8 @@ def _render() -> str:
         lines.append(_action("Start proxy", "start", refresh="true"))
     lines.append(_action("Edit rules…", "edit"))
     lines.append("---")
+    lines.append(f"Backend: {_config.backend} | color=gray size=11")
+    lines.append(_action("Switch backend", "backend", refresh="true"))
     lines.append(f"Rules: {RULES} | color=gray size=11")
     lines.append(f"Log | href=file://{_daemon.logfile}")
     lines.append("Refresh | refresh=true")

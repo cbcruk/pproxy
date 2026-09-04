@@ -9,7 +9,7 @@ from tray.daemon import ProxyDaemon
 
 @pytest.fixture
 def daemon(tmp_path):
-    return ProxyDaemon(
+    return ProxyDaemon.mitmproxy(
         "intercept.py",
         pidfile=tmp_path / "proxy.pid",
         logfile=tmp_path / "proxy.log",
@@ -19,6 +19,39 @@ def daemon(tmp_path):
 class FakeProc:
     def __init__(self, pid=4242):
         self.pid = pid
+
+
+class TestBackends:
+    def test_mitmproxy_argv(self):
+        assert ProxyDaemon.mitmproxy("intercept.py").argv == [
+            "mitmdump", "-s", "intercept.py"
+        ]
+
+    def test_node_argv(self):
+        assert ProxyDaemon.node("rules.json").argv == ["pproxy", "run", "rules.json"]
+
+    def test_command_override(self):
+        assert ProxyDaemon.mitmproxy("intercept.py", "mitmweb").argv == [
+            "mitmweb", "-s", "intercept.py"
+        ]
+
+    def test_command_is_split_shell_style(self):
+        assert ProxyDaemon.node("rules.json", "npx pproxy").argv == [
+            "npx", "pproxy", "run", "rules.json"
+        ]
+
+    def test_blank_command_falls_back_to_the_default(self):
+        for command in (None, "", "   "):
+            assert ProxyDaemon.node("rules.json", command).argv[0] == "pproxy"
+
+    def test_accepts_a_bare_argv(self):
+        assert ProxyDaemon(["pproxy", "run", "-p", "9090", "rules.json"]).argv == [
+            "pproxy", "run", "-p", "9090", "rules.json"
+        ]
+
+    def test_empty_argv_rejected(self):
+        with pytest.raises(ValueError):
+            ProxyDaemon([])
 
 
 class TestState:
@@ -103,7 +136,9 @@ def test_real_detached_lifecycle(tmp_path, monkeypatch):
         "tray.daemon.subprocess.Popen",
         lambda argv, **kwargs: real(["sleep", "30"], **kwargs),
     )
-    d = ProxyDaemon("intercept.py", pidfile=tmp_path / "p.pid", logfile=tmp_path / "p.log")
+    d = ProxyDaemon.mitmproxy(
+        "intercept.py", pidfile=tmp_path / "p.pid", logfile=tmp_path / "p.log"
+    )
     d.start()
     assert d.is_running()
     d.stop()
