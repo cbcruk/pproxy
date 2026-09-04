@@ -1,10 +1,28 @@
 import os
+import shlex
 import signal
 import subprocess
 import time
 from pathlib import Path
+from typing import Sequence
 
 from tray.paths import runtime_dir
+
+DEFAULT_MITMPROXY_COMMAND = "mitmdump"
+"""Executable that runs the mitmproxy addon."""
+
+DEFAULT_NODE_COMMAND = "pproxy"
+"""Executable installed by the Node package (``node/``)."""
+
+
+def _split(command: str | None, default: str) -> list[str]:
+    """Split a configured command shell-style, falling back to ``default``.
+
+    Lets a command carry its own launcher — ``npx pproxy``, ``uv run
+    mitmdump`` — instead of only naming an executable.
+    """
+    parts = shlex.split(command) if command else []
+    return parts or [default]
 
 
 def _alive(pid: int) -> bool:
@@ -23,13 +41,15 @@ class ProxyDaemon:
 
     Unlike an in-memory controller, this survives across separate
     invocations — the SwiftBar plugin runs, exits, and runs again, so the
-    running state must live on disk. ``start`` spawns ``mitmdump`` in its
-    own session (so it outlives the caller) and records its pid; ``stop``
-    reads that pid back and terminates the process group.
+    running state must live on disk. ``start`` spawns the proxy in its own
+    session (so it outlives the caller) and records its pid; ``stop`` reads
+    that pid back and terminates the process group.
+
+    The daemon only knows a command line, so it drives either proxy pproxy
+    ships: build it with :meth:`mitmproxy` or :meth:`node`.
 
     Args:
-        script: Path to the mitmproxy addon script (``intercept.py``).
-        command: Proxy executable. Defaults to ``mitmdump``.
+        argv: The full command line to spawn.
         pidfile: Where to record the running pid. Defaults to
             ``<runtime_dir>/proxy.pid``.
         logfile: Where the proxy's output is written. Defaults to
@@ -38,16 +58,53 @@ class ProxyDaemon:
 
     def __init__(
         self,
-        script: str | Path,
-        command: str = "mitmdump",
+        argv: Sequence[str | Path],
         pidfile: str | Path | None = None,
         logfile: str | Path | None = None,
     ) -> None:
-        self._script = str(script)
-        self._command = command
+        self._argv = [str(arg) for arg in argv]
+        if not self._argv:
+            raise ValueError("argv must not be empty")
         rt = runtime_dir()
         self._pidfile = Path(pidfile) if pidfile else rt / "proxy.pid"
         self._logfile = Path(logfile) if logfile else rt / "proxy.log"
+
+    @classmethod
+    def mitmproxy(
+        cls,
+        script: str | Path,
+        command: str | None = None,
+        **kwargs: str | Path | None,
+    ) -> "ProxyDaemon":
+        """Run the mitmproxy addon.
+
+        Args:
+            script: Path to the addon entry point (``intercept.py``).
+            command: Proxy executable. Defaults to ``mitmdump``. Split
+                shell-style, so ``"uv run mitmdump"`` works.
+        """
+        return cls([*_split(command, DEFAULT_MITMPROXY_COMMAND), "-s", script], **kwargs)
+
+    @classmethod
+    def node(
+        cls,
+        rules: str | Path,
+        command: str | None = None,
+        **kwargs: str | Path | None,
+    ) -> "ProxyDaemon":
+        """Run the Node proxy, which reads the same rules file.
+
+        Args:
+            rules: Path to the rules file (``rules.json``).
+            command: Proxy executable. Defaults to ``pproxy``. Split
+                shell-style, so ``"npx pproxy"`` works.
+        """
+        return cls([*_split(command, DEFAULT_NODE_COMMAND), "run", rules], **kwargs)
+
+    @property
+    def argv(self) -> list[str]:
+        """The command line this daemon spawns."""
+        return list(self._argv)
 
     @property
     def logfile(self) -> Path:
@@ -73,7 +130,7 @@ class ProxyDaemon:
         log = open(self._logfile, "ab")
         try:
             proc = subprocess.Popen(
-                [self._command, "-s", self._script],
+                self._argv,
                 stdout=log,
                 stderr=log,
                 stdin=subprocess.DEVNULL,

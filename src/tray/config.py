@@ -7,15 +7,22 @@ from tray.paths import config_path
 DEFAULT_EDITOR = "code"
 """The editor command used when nothing else is configured (VS Code)."""
 
+BACKENDS = ("mitmproxy", "node")
+"""The proxies pproxy can drive. Both read the same rules file."""
+
+DEFAULT_BACKEND = "mitmproxy"
+"""The proxy started when nothing else is configured."""
+
 
 class Config:
-    """Persisted app settings, currently just the editor command.
+    """Persisted app settings — the editor, and which proxy to start.
 
-    The editor is resolved in order of precedence:
+    Every setting resolves in the same order of precedence:
 
-        1. the ``PPROXY_EDITOR`` environment variable,
-        2. the ``editor`` key in the config file,
-        3. :data:`DEFAULT_EDITOR` (``code``).
+        1. an environment variable (``PPROXY_EDITOR``, ``PPROXY_BACKEND``,
+           ``PPROXY_COMMAND``),
+        2. the matching key in the config file,
+        3. the built-in default.
 
     A malformed or unreadable config file is treated as empty rather than
     raising, so a bad file never stops the app from starting.
@@ -50,6 +57,41 @@ class Config:
         if isinstance(configured, str) and configured.strip():
             return configured
         return DEFAULT_EDITOR
+
+    @property
+    def backend(self) -> str:
+        """Which proxy to start — ``"mitmproxy"`` or ``"node"``.
+
+        An unrecognized value falls back to :data:`DEFAULT_BACKEND` rather
+        than raising, so a typo in the config file cannot stop the menu bar
+        from working.
+        """
+        for candidate in (os.environ.get("PPROXY_BACKEND"), self._data.get("backend")):
+            if isinstance(candidate, str) and candidate.strip() in BACKENDS:
+                return candidate.strip()
+        return DEFAULT_BACKEND
+
+    def set_backend(self, name: str) -> None:
+        """Persist which proxy to start.
+
+        Args:
+            name: One of :data:`BACKENDS`.
+
+        Raises:
+            ValueError: If ``name`` is not a known backend.
+        """
+        if name not in BACKENDS:
+            raise ValueError(f"unknown backend {name!r}. Choose from {list(BACKENDS)}")
+        self._data["backend"] = name
+        self._save()
+
+    @property
+    def proxy_command(self) -> str | None:
+        """Override for the proxy executable, or None to use the default."""
+        for candidate in (os.environ.get("PPROXY_COMMAND"), self._data.get("proxy_command")):
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        return None
 
     def set_editor(self, command: str) -> None:
         """Persist a new editor command to the config file.
