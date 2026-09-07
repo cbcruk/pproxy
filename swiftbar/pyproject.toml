@@ -1,0 +1,10 @@
+# Test configuration for the SwiftBar menu bar plugin.
+#
+# The plugin is not a distributable package — SwiftBar runs `pproxy.5s.py`
+# directly under a stock interpreter, and it imports `tray` from this
+# directory. This file exists only so `pytest` finds the tests and the
+# package without an install step.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

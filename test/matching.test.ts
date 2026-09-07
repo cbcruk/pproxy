@@ -17,8 +17,8 @@ describe('globMatcher', () => {
     expect(globMatcher.match('https://example.com/api/users', '*/api/users/*')).toBe(false)
   })
 
-  // Verified case by case against Python's fnmatch, so one rules file
-  // behaves the same under either implementation.
+  // Verified case by case against Python's fnmatch, the semantics the
+  // rules format inherited, so existing rules files keep matching.
   it.each([
     ['*.json', 'https://cdn.example.com/data.json', true],
     ['*/users/?', 'https://e.com/users/7', true],

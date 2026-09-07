@@ -1,8 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# archive/python and the SwiftBar plugin
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
 *.egg-info/
-dist/
 build/
-node_modules/
+uv.lock

@@ -1,60 +1,87 @@
 # pproxy
 
-A rewrite of the mitmproxy addon as a general-purpose library.
-URL pattern-based response interception, testable independently without mitmproxy.
+Poorman's proxy — a URL pattern-based HTTP response interceptor. Point your
+client at it, and requests matching a rule get a mocked response instead of
+reaching the real server. Everything else passes through untouched.
 
-There are two interchangeable implementations. This one runs on Python and
-mitmproxy; [`node/`](node/README.md) runs on Node and
-[mockttp](https://github.com/httptoolkit/mockttp). **Both read the same rules
-file** — it is the contract between them — so you can switch backends without
-rewriting a single rule. See [Choosing a backend](#choosing-a-backend).
+Built on [mockttp](https://github.com/httptoolkit/mockttp): it installs with
+`npm`, carries its own runtime, and generates its own CA, so intercepting
+HTTPS is one command rather than a certificate scavenger hunt.
 
-## Installation
+> The original Python/mitmproxy implementation lives in
+> [`archive/python/`](archive/python/README.md). It still runs and still
+> reads the same rules file, but it is no longer developed — reach for it
+> only if you need **mitmweb** (mitmproxy's traffic inspector UI) or
+> transparent/WireGuard capture.
 
-```bash
-pip install -e .
-```
-
-mitmproxy is an optional dependency. Install the `proxy` extra to run the
-addon; the rule engine itself works without it.
+## Install
 
 ```bash
-pip install -e ".[proxy]"
-
-# development
-pip install -e ".[proxy,dev]"
+npm install
+npm run build
+npm link          # puts `pproxy` on your PATH
 ```
 
 ## Usage
 
-### JSON rules file
-
-```python
-# intercept.py
-from pproxy import create_addon
-addon = create_addon("rules.json")
+```bash
+pproxy run rules.json                       # 127.0.0.1:8080
+pproxy run rules.yaml -H 0.0.0.0 -p 9090 -v
+pproxy check rules.json                     # validate and exit
 ```
+
+`run` picks the format from the file extension (`.json`, `.yaml`, `.yml`) and
+hot-reloads the file while running — an edit takes effect on the next
+intercepted request, with no restart. A malformed rule during a reload keeps
+the last valid rules rather than taking the proxy down.
+
+`check` validates without starting anything and reports the *specific*
+problem — a parse error, or which rule is missing `url_pattern`:
+
+```
+  glob  */api/users/* → 200 (users)
+  regex /orders/\d+ → 201
+2 rules OK
+```
+
+It exits non-zero on a missing file, a parse error, a rule without
+`url_pattern`, or an unknown matcher.
+
+### HTTPS
+
+Intercepting HTTPS means terminating TLS, so the client has to trust a
+certificate pproxy signs. The CA is generated on the first `run` and kept in
+`~/.config/pproxy/`, so it only has to be trusted once:
+
+```bash
+pproxy cert path        # where the certificate lives
+pproxy cert install     # add it to the macOS system trust store (asks for sudo)
+pproxy cert uninstall   # remove it again
+```
+
+On other platforms, `cert path` prints the file to trust by hand. Pass
+`--http-only` to `run` to skip HTTPS entirely.
+
+### Binding
+
+The proxy listens on `127.0.0.1` unless you pass `--host`. mockttp itself
+binds every interface; pproxy narrows that, so an intercepting proxy on a
+laptop is not reachable from the network.
+
+## Rules
+
+A rules file is a list of rules, in JSON or YAML. The first match wins.
 
 ```json
 [
   {
-    "url_pattern": "*/api/users/*",
+    "name": "example_mock",
+    "url_pattern": "*/api/example*",
+    "matcher": "glob",
     "status_code": 200,
-    "body": { "users": [] },
-    "matcher": "glob"
+    "body": { "message": "mocked by pproxy", "items": [] }
   }
 ]
-```
-
-### YAML rules file
-
-```python
-from pproxy import RuleEngine, YamlLoader, MitmproxyAddon
-
-engine = RuleEngine()
-loader = YamlLoader("rules.yaml", engine)
-loader.reload_if_changed()
-addon = MitmproxyAddon(engine, loader)
 ```
 
 ```yaml
@@ -65,31 +92,19 @@ addon = MitmproxyAddon(engine, loader)
   matcher: glob
 ```
 
-### Programmatic rules
+### Matchers
 
-```python
-from pproxy import RuleEngine, Rule, MockResponse, MitmproxyAddon
+| Matcher          | Description        | Example                   |
+| ---------------- | ------------------ | ------------------------- |
+| `glob` (default) | fnmatch pattern    | `*/api/users/*`           |
+| `regex`          | Regular expression | `/users/\d+$`             |
+| `exact`          | Exact string match | `https://example.com/api` |
 
-engine = RuleEngine()
-
-engine.add_rule(Rule(
-    pattern=r"https://api\.example\.com/users/\d+",
-    matcher="regex",
-    name="user_detail",
-    response=MockResponse(status_code=200, body={"id": 1, "name": "mock"}),
-))
-
-addon = MitmproxyAddon(engine)
-```
-
-### Decorator (dynamic response)
-
-```python
-@engine.intercept("*/api/search/*", status_code=200)
-def handle_search(url: str) -> dict:
-    query = url.split("q=")[-1]
-    return {"results": [], "query": query}
-```
+> **Glob patterns and query strings.** The `glob` matcher is a full
+> `fnmatch`, so a pattern without a trailing wildcard only matches the exact
+> URL. To match real requests that carry a query string, end the pattern
+> with `*` — e.g. `*/api/exam-rooms*` matches
+> `…/api/exam-rooms?hospitalNo=42`.
 
 ### GraphQL
 
@@ -110,8 +125,8 @@ matches only when the request body carries that operation.
 ```
 
 `variables` narrows a rule further. It is compared as a subset, so only the
-listed keys have to match — put the specific rule first, since the first match
-wins.
+listed keys have to match — put the specific rule first, since the first
+match wins.
 
 ```json
 [
@@ -133,38 +148,20 @@ GraphQL operation on that URL. When a client omits `operationName`, the name
 is recovered from the query text, so only truly anonymous operations
 (`{ viewer { id } }`) match on an empty condition alone.
 
-A decorated function that declares a second parameter receives the parsed
-request, which is how a mock reads the operation's variables.
-
-```python
-from pproxy import GraphQLRequest
-
-@engine.intercept("*/graphql", graphql={"operation_name": "GetUser"})
-def handle_user(url: str, gql: GraphQLRequest) -> dict:
-    return {"data": {"user": {"id": gql.variables["id"]}}}
-```
-
 GraphQL reports errors with HTTP 200 and an `errors` array, so mock a failure
 by setting `body` rather than `status_code`.
 
-Only the `application/json` POST form is recognized. These fall through to the
-real server untouched:
+Only the `application/json` POST form is recognized. These fall through to
+the real server untouched:
 
 - batched requests (a JSON array of operations)
 - `GET` requests carrying the query in the query string
 - `application/graphql` bodies and multipart file uploads
 - persisted queries (APQ) that send only a hash, with no query text
 
-### Response delay simulation
+### Response delay
 
-Set `delay_ms` to simulate slow APIs.
-
-```python
-engine.add_rule(Rule(
-    pattern="*/api/slow/*",
-    response=MockResponse(status_code=200, body={"ok": True}, delay_ms=2000),
-))
-```
+Set `delay_ms` to simulate a slow API.
 
 ```json
 [
@@ -177,179 +174,118 @@ engine.add_rule(Rule(
 ]
 ```
 
-### Hooks
+## Library use
 
-```python
-def log_intercept(url: str, rule: Rule) -> None:
-    print(f"INTERCEPTED [{rule.name}] {url}")
+The rule engine is independent of the proxy, so rules can be unit tested
+without starting anything:
 
-engine.add_hook(log_intercept)
+```ts
+import { RuleEngine } from 'pproxy'
+
+const engine = new RuleEngine().load([
+  { url_pattern: '*/api/users/*', status_code: 200, body: { users: [] } },
+])
+
+await engine.match('https://example.com/api/users/1') // → MockResponse
+await engine.match('https://example.com/health')      // → null
 ```
 
-## Matchers
+Rules whose body depends on the request are registered with `intercept`,
+which also accepts async handlers:
 
-| Matcher          | Description        | Example                   |
-| ---------------- | ------------------ | ------------------------- |
-| `glob` (default) | fnmatch pattern    | `*/api/users/*`           |
-| `regex`          | Regular expression | `r"/users/\d+$"`          |
-| `exact`          | Exact string match | `https://example.com/api` |
+```ts
+engine.intercept('*/api/search*', (url) => ({ query: new URL(url).searchParams.get('q') }))
 
-## Running the proxy
-
-### CLI
-
-```bash
-pproxy run rules.yaml
-pproxy run rules.json --host 0.0.0.0 --port 9090 --verbose
+engine.intercept(
+  '*/graphql',
+  (_url, gql) => ({ data: { user: { id: gql?.variables['id'] } } }),
+  { graphql: { operation_name: 'GetUser' } },
+)
 ```
 
-`run` picks the loader from the file extension (`.json`, `.yaml`, `.yml`),
-hot-reloads the file while running, and listens on `127.0.0.1:8080` by default.
+To run an engine against real traffic:
 
-Validate a rules file without starting the proxy:
+```ts
+import { RuleEngine, startProxy, ensureCA } from 'pproxy'
 
-```bash
-pproxy check rules.yaml
+const ca = await ensureCA()
+const server = await startProxy(engine, null, { port: 8080, https: ca })
 ```
-
-```
-  glob  */api/users/* → 200 (users)
-  regex /orders/\d+ → 201
-2 rules OK
-```
-
-`check` exits non-zero on a missing file, a parse error, a rule without
-`url_pattern`, or an unknown matcher.
-
-### mitmproxy directly
-
-The repo also ships an `intercept.py` entry point that loads `rules.json`:
-
-```bash
-mitmdump -s intercept.py      # headless
-mitmweb  -s intercept.py      # with mitmproxy's web UI
-```
-
-`intercept.py` builds the addon with `create_addon("rules.json")`.
-
-### Node
-
-The same rules run under the Node package, which needs no Python and
-generates its own CA:
-
-```bash
-cd node && npm install && npm run build && npm link
-pproxy run ../rules.json
-pproxy cert install     # trust the CA once (macOS)
-```
-
-Full details in [`node/README.md`](node/README.md).
-
-> **Glob patterns and query strings.** The `glob` matcher is a full
-> `fnmatch`, so a pattern without a trailing wildcard only matches the
-> exact URL. To match real requests that carry a query string, end the
-> pattern with `*` — e.g. `*/api/exam-rooms*` matches
-> `…/api/exam-rooms?hospitalNo=42`.
-
-> **HTTPS interception.** To intercept HTTPS you must trust the proxy's CA
-> certificate once, or HTTPS requests fail instead of being mocked. Under
-> mitmproxy: start the proxy, visit <http://mitm.it>, and follow the macOS
-> instructions (add the cert to the System keychain and mark it trusted).
-> Under Node: `pproxy cert install`.
-
-## Choosing a backend
-
-|                                      | Python (mitmproxy)             | Node (mockttp)          |
-| ------------------------------------ | ------------------------------ | ----------------------- |
-| Install                              | `pip install -e ".[proxy]"`    | `npm install`           |
-| Traffic inspector UI                 | **`mitmweb -s intercept.py`**  | —                       |
-| Transparent / WireGuard capture      | **yes**                        | —                       |
-| Trusting the CA                      | mitm.it, by hand               | `pproxy cert install`   |
-| CORS, HTTP/2, WebSockets             | yes                            | yes                     |
-| Connection faults (reset/hang/close) | —                              | available in mockttp    |
-
-Reach for Python when you want to *watch* traffic in mitmweb or capture from
-a phone. Reach for Node when you want the proxy on a machine without a Python
-environment, or a CA you can trust from a script.
 
 ## Menu bar (SwiftBar plugin, macOS)
 
 Rather than shipping its own menu bar app, pproxy plugs into
 [SwiftBar](https://swiftbar.app): SwiftBar owns the menu bar and runs the
-plugin, and the plugin drives pproxy. Nothing beyond the standard library
-is needed — the plugin shells out to the `tray` package.
+plugin, and the plugin drives pproxy. Nothing beyond the Python standard
+library is needed — the plugin shells out to the `tray` package next to it,
+so there is no install step.
 
-Install SwiftBar, then symlink the plugin into your SwiftBar plugin
-folder:
+Install SwiftBar, then symlink the plugin into your SwiftBar plugin folder:
 
 ```bash
 ln -s "$PWD/swiftbar/pproxy.5s.py" ~/Library/Application\ Support/SwiftBar/Plugins/
 ```
 
 The plugin finds the project via its own real path (so the symlink still
-locates `intercept.py` and `rules.json`), or via the `PPROXY_HOME`
-environment variable. The menu offers:
+locates `rules.json`), or via the `PPROXY_HOME` environment variable. The
+menu offers:
 
-- **Start / Stop proxy** — starts the configured backend as a detached
-  process (tracked by a pidfile in `~/.config/pproxy/`), points the macOS
-  system proxy at `127.0.0.1:8080`, and shows the running state (🟢 / ⚪️)
-  in the menu bar. Stopping clears the system proxy so normal internet
-  access is restored.
-- **Edit rules…** — opens the rules file in your editor. Because the
-  proxy hot-reloads that file (`JsonLoader.reload_if_changed`), edits go
-  live on the next intercepted request — no restart.
-- **Switch backend** — swaps between `mitmdump -s intercept.py` and
-  `pproxy run rules.json`, restarting the proxy if it was running. Both
-  read the same `rules.json`, so nothing else changes.
+- **Start / Stop proxy** — runs `pproxy run rules.json` as a detached process
+  (tracked by a pidfile in `~/.config/pproxy/`), points the macOS system
+  proxy at `127.0.0.1:8080`, and shows the running state (🟢 / ⚪️) in the
+  menu bar. Stopping clears the system proxy so normal internet access is
+  restored.
+- **Edit rules…** — opens the rules file in your editor. Because the proxy
+  hot-reloads that file, edits go live on the next intercepted request — no
+  restart.
 - **Log** — opens the proxy's output log.
 
-System-proxy changes use `networksetup` on the auto-detected active
-network service (Wi-Fi, etc.) and are *fail-soft*: if that can't be done,
-it's logged and the proxy still runs — point your client at
-`127.0.0.1:8080` manually.
+`pproxy` has to be on the PATH for this (`npm link` above), or be named
+explicitly with `proxy_command`.
+
+System-proxy changes use `networksetup` on the auto-detected active network
+service (Wi-Fi, etc.) and are *fail-soft*: if that can't be done, it's logged
+and the proxy still runs — point your client at `127.0.0.1:8080` manually.
 
 Settings live in `~/.config/pproxy/config.json`, and each one can be
 overridden by an environment variable:
 
-| Setting         | Environment variable | Default      | Meaning                                   |
-| --------------- | -------------------- | ------------ | ----------------------------------------- |
-| `editor`        | `PPROXY_EDITOR`      | `code`       | editor for **Edit rules…**                |
-| `backend`       | `PPROXY_BACKEND`     | `mitmproxy`  | `mitmproxy` or `node`                     |
-| `proxy_command` | `PPROXY_COMMAND`     | per backend  | override the executable that gets spawned |
+| Setting         | Environment variable | Default  | Meaning                                   |
+| --------------- | -------------------- | -------- | ----------------------------------------- |
+| `editor`        | `PPROXY_EDITOR`      | `code`   | editor for **Edit rules…**                |
+| `proxy_command` | `PPROXY_COMMAND`     | `pproxy` | override the executable that gets spawned |
 
 ```bash
-PPROXY_EDITOR="subl" ...    # use Sublime Text instead
-PPROXY_BACKEND=node ...     # start the Node proxy
+PPROXY_EDITOR="subl" ...            # use Sublime Text instead
+PPROXY_COMMAND="npx pproxy" ...     # skip `npm link`
 ```
 
-An unrecognized `backend` falls back to the default rather than raising, so
-a typo in the config file cannot stop the menu bar from working.
+The plugin is macOS-only (SwiftBar and `networksetup`). On other platforms,
+run `pproxy run rules.json` directly and edit the rules file in any editor.
 
-The plugin is macOS-only (SwiftBar and `networksetup`). On other
-platforms, drive the proxy directly with `mitmdump`/`mitmweb` as shown
-above and edit the rules file in any editor.
-
-## Testing
-
-RuleEngine can be unit tested without mitmproxy:
+## Development
 
 ```bash
-pytest
+npm test          # vitest — engine, loaders, CLI, and live proxy tests
+npm run typecheck
 ```
 
-```python
-def test_glob_match():
-    engine = RuleEngine().load([{
-        "url_pattern": "*/api/*",
-        "status_code": 200,
-        "body": {"ok": True},
-    }])
-    assert engine.match("https://example.com/api/users") is not None
-    assert engine.match("https://example.com/health") is None
-```
+The proxy tests start a real mockttp server and drive it over an actual proxy
+connection, including a CONNECT tunnel with TLS terminated by the generated
+CA.
 
-The Node package has its own suite, including tests that drive a live proxy:
+The SwiftBar plugin has its own suite:
 
 ```bash
-cd node && npm test
+cd swiftbar && pytest
+```
+
+## Layout
+
+```
+src/            the proxy and rule engine (TypeScript)
+test/           its tests
+rules.json      example rules, and what the menu bar plugin drives
+swiftbar/       macOS menu bar plugin + the `tray` package it shells out to
+archive/python/ the original mitmproxy implementation, no longer developed
 ```

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .models import Rule, MockResponse, Request
 from .engine import RuleEngine
 from .graphql import GraphQLCondition, GraphQLRequest, parse_graphql
@@ -17,7 +19,7 @@ except ImportError:
     MitmproxyAddon = None  # type: ignore[assignment, misc]
 
 
-def create_addon(rules_path: str = "rules.json") -> "MitmproxyAddon":
+def create_addon(rules_path: str | Path = "rules.json") -> "MitmproxyAddon":
     """Create a ready-to-use mitmproxy addon in one line.
 
     Sets up the engine, loader, and adapter with sensible defaults.

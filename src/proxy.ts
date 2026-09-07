@@ -22,8 +22,7 @@ import type { MockResponse, ProxyRequest } from './models.js'
 
 /**
  * Permissive CORS, reflecting the request's Origin so `credentials: true`
- * requests work. This replaces the hand-rolled header building in the
- * Python adapter — mockttp applies it to mocked *and* passed-through
+ * requests work. mockttp applies it to mocked *and* passed-through
  * responses, and answers OPTIONS preflights on its own.
  */
 export const CORS_OPTIONS = {
@@ -153,9 +152,9 @@ export async function startProxy(
  * Start the server bound to a single interface.
  *
  * mockttp calls `server.listen(port)` internally, which binds every
- * interface — for a MITM proxy on a laptop that is a downgrade from
- * mitmproxy's loopback default. Node's own `listen` accepts a host, so the
- * bind is redirected for the duration of startup.
+ * interface — for a MITM proxy on a laptop that is a downgrade from the
+ * usual loopback default. Node's own `listen` accepts a host, so the bind
+ * is redirected for the duration of startup.
  */
 async function listenOn(server: Mockttp, port: number | undefined, host: string): Promise<void> {
   const original = net.Server.prototype.listen
