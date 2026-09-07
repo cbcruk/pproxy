@@ -7,20 +7,13 @@ from tray.paths import config_path
 DEFAULT_EDITOR = "code"
 """The editor command used when nothing else is configured (VS Code)."""
 
-BACKENDS = ("mitmproxy", "node")
-"""The proxies pproxy can drive. Both read the same rules file."""
-
-DEFAULT_BACKEND = "mitmproxy"
-"""The proxy started when nothing else is configured."""
-
 
 class Config:
-    """Persisted app settings — the editor, and which proxy to start.
+    """Persisted app settings — the editor, and how to start the proxy.
 
     Every setting resolves in the same order of precedence:
 
-        1. an environment variable (``PPROXY_EDITOR``, ``PPROXY_BACKEND``,
-           ``PPROXY_COMMAND``),
+        1. an environment variable (``PPROXY_EDITOR``, ``PPROXY_COMMAND``),
         2. the matching key in the config file,
         3. the built-in default.
 
@@ -57,33 +50,6 @@ class Config:
         if isinstance(configured, str) and configured.strip():
             return configured
         return DEFAULT_EDITOR
-
-    @property
-    def backend(self) -> str:
-        """Which proxy to start — ``"mitmproxy"`` or ``"node"``.
-
-        An unrecognized value falls back to :data:`DEFAULT_BACKEND` rather
-        than raising, so a typo in the config file cannot stop the menu bar
-        from working.
-        """
-        for candidate in (os.environ.get("PPROXY_BACKEND"), self._data.get("backend")):
-            if isinstance(candidate, str) and candidate.strip() in BACKENDS:
-                return candidate.strip()
-        return DEFAULT_BACKEND
-
-    def set_backend(self, name: str) -> None:
-        """Persist which proxy to start.
-
-        Args:
-            name: One of :data:`BACKENDS`.
-
-        Raises:
-            ValueError: If ``name`` is not a known backend.
-        """
-        if name not in BACKENDS:
-            raise ValueError(f"unknown backend {name!r}. Choose from {list(BACKENDS)}")
-        self._data["backend"] = name
-        self._save()
 
     @property
     def proxy_command(self) -> str | None:

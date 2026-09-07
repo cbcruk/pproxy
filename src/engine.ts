@@ -1,7 +1,7 @@
 /**
  * The rule engine.
  *
- * Ported from `src/pproxy/engine.py`. Completely independent of mockttp —
+ * Ported from `archive/python/src/pproxy/engine.py`. Completely independent of mockttp —
  * it only deals with plain values, so it can be unit tested without
  * starting a proxy.
  */

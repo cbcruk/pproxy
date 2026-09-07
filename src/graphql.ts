@@ -1,7 +1,7 @@
 /**
  * GraphQL request parsing and rule conditions.
  *
- * Ported from `src/pproxy/graphql.py`.
+ * Ported from `archive/python/src/pproxy/graphql.py`.
  */
 
 /**

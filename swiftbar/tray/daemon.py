@@ -8,18 +8,15 @@ from typing import Sequence
 
 from tray.paths import runtime_dir
 
-DEFAULT_MITMPROXY_COMMAND = "mitmdump"
-"""Executable that runs the mitmproxy addon."""
-
-DEFAULT_NODE_COMMAND = "pproxy"
-"""Executable installed by the Node package (``node/``)."""
+DEFAULT_COMMAND = "pproxy"
+"""Executable installed by the Node package at the repository root."""
 
 
 def _split(command: str | None, default: str) -> list[str]:
     """Split a configured command shell-style, falling back to ``default``.
 
-    Lets a command carry its own launcher — ``npx pproxy``, ``uv run
-    mitmdump`` — instead of only naming an executable.
+    Lets a command carry its own launcher — ``npx pproxy``, ``node
+    dist/cli.js`` — instead of only naming an executable.
     """
     parts = shlex.split(command) if command else []
     return parts or [default]
@@ -45,8 +42,8 @@ class ProxyDaemon:
     session (so it outlives the caller) and records its pid; ``stop`` reads
     that pid back and terminates the process group.
 
-    The daemon only knows a command line, so it drives either proxy pproxy
-    ships: build it with :meth:`mitmproxy` or :meth:`node`.
+    The daemon only knows a command line, so build it with :meth:`node`
+    rather than naming the executable here.
 
     Args:
         argv: The full command line to spawn.
@@ -70,36 +67,20 @@ class ProxyDaemon:
         self._logfile = Path(logfile) if logfile else rt / "proxy.log"
 
     @classmethod
-    def mitmproxy(
-        cls,
-        script: str | Path,
-        command: str | None = None,
-        **kwargs: str | Path | None,
-    ) -> "ProxyDaemon":
-        """Run the mitmproxy addon.
-
-        Args:
-            script: Path to the addon entry point (``intercept.py``).
-            command: Proxy executable. Defaults to ``mitmdump``. Split
-                shell-style, so ``"uv run mitmdump"`` works.
-        """
-        return cls([*_split(command, DEFAULT_MITMPROXY_COMMAND), "-s", script], **kwargs)
-
-    @classmethod
     def node(
         cls,
         rules: str | Path,
         command: str | None = None,
         **kwargs: str | Path | None,
     ) -> "ProxyDaemon":
-        """Run the Node proxy, which reads the same rules file.
+        """Run the Node proxy against a rules file.
 
         Args:
             rules: Path to the rules file (``rules.json``).
             command: Proxy executable. Defaults to ``pproxy``. Split
                 shell-style, so ``"npx pproxy"`` works.
         """
-        return cls([*_split(command, DEFAULT_NODE_COMMAND), "run", rules], **kwargs)
+        return cls([*_split(command, DEFAULT_COMMAND), "run", rules], **kwargs)
 
     @property
     def argv(self) -> list[str]:

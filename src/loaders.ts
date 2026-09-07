@@ -1,7 +1,7 @@
 /**
  * Rules file reading and hot-reload.
  *
- * Ported from `src/pproxy/loaders/`. The loader watches a file's mtime and
+ * Ported from `archive/python/src/pproxy/loaders/`. The loader watches a file's mtime and
  * re-reads it into the engine when it changes; if the new content fails to
  * parse, the last valid rules are kept so a half-typed edit never takes the
  * proxy down. `readRules` is the same read without that safety net, for

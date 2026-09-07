@@ -1,7 +1,7 @@
 /**
  * Engine-native request/response/rule types.
  *
- * Ported from `src/pproxy/models.py`. Field names in a *rules file* stay
+ * Ported from `archive/python/src/pproxy/models.py`. Field names in a *rules file* stay
  * snake_case so a single `rules.json` drives either implementation; the
  * in-memory types use the JavaScript convention.
  */

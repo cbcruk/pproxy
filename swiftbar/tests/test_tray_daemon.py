@@ -9,8 +9,8 @@ from tray.daemon import ProxyDaemon
 
 @pytest.fixture
 def daemon(tmp_path):
-    return ProxyDaemon.mitmproxy(
-        "intercept.py",
+    return ProxyDaemon.node(
+        "rules.json",
         pidfile=tmp_path / "proxy.pid",
         logfile=tmp_path / "proxy.log",
     )
@@ -21,19 +21,12 @@ class FakeProc:
         self.pid = pid
 
 
-class TestBackends:
-    def test_mitmproxy_argv(self):
-        assert ProxyDaemon.mitmproxy("intercept.py").argv == [
-            "mitmdump", "-s", "intercept.py"
-        ]
-
+class TestArgv:
     def test_node_argv(self):
         assert ProxyDaemon.node("rules.json").argv == ["pproxy", "run", "rules.json"]
 
     def test_command_override(self):
-        assert ProxyDaemon.mitmproxy("intercept.py", "mitmweb").argv == [
-            "mitmweb", "-s", "intercept.py"
-        ]
+        assert ProxyDaemon.node("rules.json", "npx pproxy").argv[0] == "npx"
 
     def test_command_is_split_shell_style(self):
         assert ProxyDaemon.node("rules.json", "npx pproxy").argv == [
@@ -80,7 +73,7 @@ class TestStart:
 
         monkeypatch.setattr("tray.daemon.subprocess.Popen", fake_popen)
         daemon.start()
-        assert captured["argv"] == ["mitmdump", "-s", "intercept.py"]
+        assert captured["argv"] == ["pproxy", "run", "rules.json"]
         assert captured["kwargs"]["start_new_session"] is True
         assert (tmp_path / "proxy.pid").read_text() == "4242"
 
@@ -136,8 +129,8 @@ def test_real_detached_lifecycle(tmp_path, monkeypatch):
         "tray.daemon.subprocess.Popen",
         lambda argv, **kwargs: real(["sleep", "30"], **kwargs),
     )
-    d = ProxyDaemon.mitmproxy(
-        "intercept.py", pidfile=tmp_path / "p.pid", logfile=tmp_path / "p.log"
+    d = ProxyDaemon.node(
+        "rules.json", pidfile=tmp_path / "p.pid", logfile=tmp_path / "p.log"
     )
     d.start()
     assert d.is_running()

@@ -1,8 +1,8 @@
 """macOS system HTTP/HTTPS proxy toggling via ``networksetup``.
 
-The menu bar app points the system proxy at the running mitmproxy while
-the proxy is up, and clears it when the proxy stops — so turning pproxy
-off (or quitting) restores normal internet access automatically.
+The menu bar plugin points the system proxy at pproxy while it is up,
+and clears it when the proxy stops — so turning pproxy off (or quitting)
+restores normal internet access automatically.
 
 Every call is *fail-soft*: if ``networksetup``/``route`` is missing or
 returns an error (e.g. on a non-macOS host, or without permission), the
@@ -17,7 +17,7 @@ logger = logging.getLogger("pproxy")
 
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 8080
-"""Defaults matching mitmproxy's listen address."""
+"""Defaults matching the address ``pproxy run`` listens on."""
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str] | None:

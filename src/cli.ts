@@ -2,7 +2,7 @@
 /**
  * The `pproxy` command.
  *
- * Ported from `src/pproxy/cli.py`, plus a `cert` command — mockttp keeps its
+ * Ported from `archive/python/src/pproxy/cli.py`, plus a `cert` command — mockttp keeps its
  * CA as ordinary files, so trusting it can be scripted instead of walked
  * through by hand.
  */

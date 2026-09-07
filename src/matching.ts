@@ -1,9 +1,9 @@
 /**
  * URL matching strategies.
  *
- * Ported from `src/pproxy/matching.py`. The `glob` matcher reproduces
- * Python's `fnmatch` semantics so a rules file behaves identically under
- * either implementation.
+ * The `glob` matcher reproduces Python's `fnmatch` semantics, which is
+ * where the rules format came from (see `archive/python/`), so existing
+ * rules files keep matching exactly as they did.
  */
 
 export type MatcherName = 'glob' | 'regex' | 'exact'

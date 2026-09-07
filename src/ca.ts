@@ -13,7 +13,7 @@ import * as path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { generateCACertificate } from 'mockttp'
 
-/** Where pproxy keeps its config and runtime files, matching the Python `tray.paths`. */
+/** Where pproxy keeps its config and runtime files, shared with the SwiftBar plugin. */
 export function runtimeDir(): string {
   const base = process.env['XDG_CONFIG_HOME'] || path.join(os.homedir(), '.config')
   return path.join(base, 'pproxy')
