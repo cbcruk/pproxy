@@ -17,11 +17,18 @@ import type { RuleData } from './models.js'
 
 /** A rules file format: how to parse it, and what to call it in an error. */
 export interface RuleFormat {
+  /** Display name, used in parse-error messages. */
   name: string
+  /**
+   * Parse the file's text. Returns `unknown` because a rules file is arbitrary
+   * user input until {@link RuleEngine.load} validates it.
+   */
   parse(text: string): unknown
 }
 
+/** The `.json` format. */
 const JSON_FORMAT: RuleFormat = { name: 'JSON', parse: (text) => JSON.parse(text) }
+/** The `.yaml` and `.yml` formats, which share one parser. */
 const YAML_FORMAT: RuleFormat = { name: 'YAML', parse: (text) => parseYaml(text) }
 
 /** Rules file extension to format. Add new formats here. */
@@ -57,6 +64,12 @@ export function readRules(filePath: string): RuleData[] {
   return format.parse(fs.readFileSync(filePath, 'utf8')) as RuleData[]
 }
 
+/**
+ * A source of rules that can be re-checked for changes.
+ *
+ * The proxy polls this on every request, so an implementation must be cheap
+ * when nothing has changed.
+ */
 export interface Loader {
   /**
    * Reload the rules if the source changed.
@@ -73,10 +86,19 @@ export interface Loader {
  * ignored — the rules already in the engine stay in force.
  */
 export class RulesFileLoader implements Loader {
+  /** The format resolved from the file's extension, fixed at construction. */
   readonly format: RuleFormat
+  /** mtime of the last successful read, used to skip unchanged files. */
   #mtimeMs = 0
+  /** The last rules that parsed, kept so a broken edit changes nothing. */
   #lastValid: RuleData[] = []
 
+  /**
+   * @param filePath Rules file to watch.
+   * @param engine Engine to load the rules into on every successful read.
+   * @param log Where parse failures are reported; defaults to `console.warn`.
+   * @throws If the file's extension has no registered format.
+   */
   constructor(
     readonly filePath: string,
     private readonly engine: RuleEngine,
@@ -90,6 +112,15 @@ export class RulesFileLoader implements Loader {
     return this.#lastValid
   }
 
+  /**
+   * Re-read the file when its mtime has moved, and load the result.
+   *
+   * Never throws: a missing file or a parse error is logged and reported as
+   * `false`, leaving the rules already in the engine untouched. That is what
+   * keeps a half-typed edit from taking the proxy down.
+   *
+   * @returns True when rules were reloaded, false when unchanged or on error.
+   */
   reloadIfChanged(): boolean {
     let mtimeMs: number
     try {

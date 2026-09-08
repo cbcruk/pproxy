@@ -28,17 +28,31 @@ export type InterceptHook = (url: string, rule: Rule) => void
 
 /** Options for {@link RuleEngine.intercept}. */
 export interface InterceptOptions {
+  /** Status code to respond with; defaults to 200. */
   statusCode?: number
+  /** Matching strategy name; defaults to `"glob"`. */
   matcher?: string
+  /** Content-Type; defaults to `"application/json"`. */
   contentType?: string
+  /** Extra response headers. */
   headers?: Record<string, string>
+  /** Artificial delay in milliseconds; defaults to 0. */
   delayMs?: number
+  /**
+   * Extra condition on the GraphQL request body. Accepts either the in-memory
+   * {@link GraphQLCondition} or the snake_case rules-file form.
+   */
   graphql?: GraphQLCondition | GraphQLConditionData | null
 }
 
 /** A rule that matched, with the parsed GraphQL body if one was needed. */
 export interface Match {
+  /** The first rule that matched, in registration order. */
   rule: Rule
+  /**
+   * The parsed request body, but only when the rule carried a GraphQL
+   * condition. `null` for a plain URL rule, which never reads the body.
+   */
   graphql: GraphQLRequest | null
 }
 
@@ -48,7 +62,9 @@ export interface Match {
  * Rules are evaluated in registration order — first match wins.
  */
 export class RuleEngine {
+  /** Registered rules, in evaluation order. First match wins. */
   #rules: Rule[] = []
+  /** Hooks fired once per interception, in registration order. */
   #hooks: InterceptHook[] = []
 
   /** The registered rules, in evaluation order. */
@@ -92,10 +108,20 @@ export class RuleEngine {
    * condition, the parsed request — which is how a mock reads the operation's
    * variables.
    *
+   * Unlike {@link load}, this appends: a rule registered here sits after
+   * everything already registered, and first match wins.
+   *
+   * @example Echo a variable back from a GraphQL mock
    * ```ts
-   * engine.intercept('*​/graphql', (url, gql) => ({
-   *   data: { user: { id: gql?.variables.id } },
-   * }), { graphql: { operation_name: 'GetUser' } })
+   * import { RuleEngine } from 'pproxy'
+   *
+   * const engine = new RuleEngine()
+   *
+   * engine.intercept(
+   *   'https://example.com/graphql',
+   *   (url, gql) => ({ data: { user: { id: gql?.variables['id'] } } }),
+   *   { graphql: { operation_name: 'GetUser' } },
+   * )
    * ```
    */
   intercept(pattern: string, handler: BodyHandler, options: InterceptOptions = {}): this {
@@ -195,7 +221,15 @@ export class RuleEngine {
   }
 }
 
-/** @see RuleEngine.serializeBody */
+/**
+ * Convert a response body to the bytes sent over the wire.
+ *
+ * The standalone form of {@link RuleEngine.serializeBody}, for callers holding
+ * a body rather than a whole response.
+ *
+ * @returns JSON for objects and arrays, UTF-8 for strings, the buffer itself
+ * for a buffer, and an empty buffer for `null`.
+ */
 export function serializeBody(body: Body): Buffer {
   if (body === null || body === undefined) return Buffer.alloc(0)
   if (Buffer.isBuffer(body)) return body

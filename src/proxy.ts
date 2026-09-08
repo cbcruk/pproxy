@@ -31,6 +31,7 @@ export const CORS_OPTIONS = {
   methods: 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
 } as const
 
+/** Options for {@link startProxy}. */
 export interface ProxyOptions {
   /** Interface to bind. Defaults to loopback only. */
   host?: string
@@ -52,6 +53,13 @@ function flattenHeaders(headers: CompletedRequest['headers']): Record<string, st
   return flat
 }
 
+/**
+ * Convert a mockttp request into the engine's plain {@link ProxyRequest}.
+ *
+ * The one place mockttp's types cross into the engine. The body is decoded
+ * (gzip, brotli) so rules match on what the client actually sent, falling back
+ * to the raw buffer when it cannot be decoded.
+ */
 async function toProxyRequest(request: CompletedRequest): Promise<ProxyRequest> {
   const decoded = await request.body.getDecodedBuffer()
   return {
@@ -70,10 +78,13 @@ async function toProxyRequest(request: CompletedRequest): Promise<ProxyRequest> 
  * cap bounds the leak if a client disconnects in between.
  */
 class PendingMatches {
+  /** Matches awaiting their handler, keyed by mockttp's request id. */
   #entries = new Map<string, { request: ProxyRequest; match: Match }>()
 
+  /** @param limit How many unclaimed matches to hold before evicting the oldest. */
   constructor(private readonly limit = 500) {}
 
+  /** Store a match, evicting the oldest entry once the cap is reached. */
   set(id: string, value: { request: ProxyRequest; match: Match }): void {
     if (this.#entries.size >= this.limit) {
       const oldest = this.#entries.keys().next()
@@ -82,6 +93,12 @@ class PendingMatches {
     this.#entries.set(id, value)
   }
 
+  /**
+   * Remove and return a stored match.
+   *
+   * @returns The match, or `undefined` when the entry was evicted — the caller
+   * then matches again rather than failing.
+   */
   take(id: string): { request: ProxyRequest; match: Match } | undefined {
     const value = this.#entries.get(id)
     this.#entries.delete(id)
@@ -92,8 +109,24 @@ class PendingMatches {
 /**
  * Start an intercepting proxy backed by `engine`.
  *
+ * Binds loopback only unless `options.host` says otherwise, and intercepts
+ * plain HTTP unless `options.https` supplies a CA — see {@link ensureCA}.
+ *
+ * @param engine Consulted live on every request, so rules may change while the
+ * proxy runs without anything being re-registered.
  * @param loader Optional loader, polled for changes on every request.
  * @returns The running mockttp server; call `.stop()` to shut it down.
+ *
+ * @example Run on a random free port
+ * ```ts
+ * import { RuleEngine, startProxy } from 'pproxy'
+ *
+ * const engine = new RuleEngine().load([{ url_pattern: 'https://example.com/api/*' }])
+ * const server = await startProxy(engine, null)
+ *
+ * server.port // the port that was chosen
+ * await server.stop()
+ * ```
  */
 export async function startProxy(
   engine: RuleEngine,

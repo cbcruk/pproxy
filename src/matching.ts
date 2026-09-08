@@ -6,14 +6,18 @@
  * rules files keep matching exactly as they did.
  */
 
+/** Name of a built-in matching strategy, as written in a rules file. */
 export type MatcherName = 'glob' | 'regex' | 'exact'
 
+/** A strategy for deciding whether a URL matches a rule's pattern. */
 export interface Matcher {
   /** Test whether a URL matches the given pattern. */
   match(url: string, pattern: string): boolean
 }
 
+/** Marks a `*` in a translated pattern, so runs of them can be collapsed. */
 const STAR = Symbol('star')
+/** One piece of a translated pattern: regex source text, or a wildcard. */
 type Token = string | typeof STAR
 
 /** Escape a single literal character for use inside a regular expression. */
@@ -75,9 +79,17 @@ export function translateGlob(pattern: string): string {
   return `^${body}$`
 }
 
+/** Compiled glob patterns, keyed by the source pattern. */
 const globCache = new Map<string, RegExp>()
+/** Compiled regex patterns, keyed by the source pattern. */
 const regexCache = new Map<string, RegExp>()
 
+/**
+ * Return the compiled expression for a pattern, compiling it on first use.
+ *
+ * Patterns come from a rules file and are reused for the life of the process,
+ * so the cache is unbounded on purpose.
+ */
 function cached(cache: Map<string, RegExp>, key: string, build: () => RegExp): RegExp {
   let compiled = cache.get(key)
   if (!compiled) {
@@ -90,7 +102,7 @@ function cached(cache: Map<string, RegExp>, key: string, build: () => RegExp): R
 /**
  * Matches URLs using shell-style wildcards.
  *
- * `*​/api/users/*` matches `https://example.com/api/users/123`.
+ * `*example.com/api/users/*` matches `https://example.com/api/users/123`.
  */
 export const globMatcher: Matcher = {
   match(url, pattern) {

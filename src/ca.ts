@@ -19,12 +19,19 @@ export function runtimeDir(): string {
   return path.join(base, 'pproxy')
 }
 
+/** On-disk locations of the CA pair. */
 export interface CAPaths {
+  /** PEM private key, written user-readable only. */
   keyPath: string
+  /** PEM certificate — the file a client has to trust. */
   certPath: string
 }
 
-/** Paths to the CA private key and certificate. */
+/**
+ * Paths to the CA private key and certificate.
+ *
+ * Pure path arithmetic — it does not check whether the files exist.
+ */
 export function caPaths(dir: string = runtimeDir()): CAPaths {
   return {
     keyPath: path.join(dir, 'ca-key.pem'),
@@ -37,6 +44,9 @@ export function caPaths(dir: string = runtimeDir()): CAPaths {
  *
  * The CA is reused across runs so the certificate only has to be trusted
  * once. The private key is written user-readable only.
+ *
+ * @returns The paths, plus `created` — true only on the run that generated
+ * them, which is when the caller should tell the user to trust the CA.
  */
 export async function ensureCA(dir: string = runtimeDir()): Promise<CAPaths & { created: boolean }> {
   const paths = caPaths(dir)
@@ -53,7 +63,12 @@ export async function ensureCA(dir: string = runtimeDir()): Promise<CAPaths & { 
   return { ...paths, created: true }
 }
 
-/** The `security` invocation that trusts (or untrusts) the CA on macOS. */
+/**
+ * The `security` invocation that trusts (or untrusts) the CA on macOS.
+ *
+ * Returned rather than run, so `pproxy cert` can print the exact command
+ * before executing it.
+ */
 export function trustCommand(certPath: string, action: 'install' | 'uninstall'): string[] {
   return action === 'install'
     ? [
@@ -74,8 +89,10 @@ export function trustCommand(certPath: string, action: 'install' | 'uninstall'):
  * Add the CA to (or remove it from) the macOS system trust store.
  *
  * Runs with the caller's stdio attached so `sudo` can prompt for a password.
+ * macOS only — the caller checks the platform first.
  *
- * @returns The process exit status.
+ * @returns The process exit status, or 1 when `security` reported none.
+ * @throws If the `security` process could not be spawned at all.
  */
 export function trustCA(certPath: string, action: 'install' | 'uninstall'): number {
   const [command, ...args] = trustCommand(certPath, action)
