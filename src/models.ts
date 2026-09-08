@@ -57,16 +57,34 @@ export function proxyRequest(url: string, overrides: Partial<ProxyRequest> = {})
   }
 }
 
-/** A rule as written in a JSON or YAML rules file. */
+/**
+ * A rule as written in a JSON or YAML rules file.
+ *
+ * Field names are snake_case because a rules file is shared with the archived
+ * Python implementation; {@link Rule} is the camelCase in-memory form, and
+ * {@link Rule.fromData} converts between them.
+ */
 export interface RuleData {
+  /** URL pattern. The only required field. */
   url_pattern: string
+  /** Matching strategy name; defaults to `"glob"`. */
   matcher?: string
+  /** Label for `check` output and verbose logs. */
   name?: string
+  /** Status code to respond with; defaults to 200. */
   status_code?: number
+  /**
+   * Response body. Omitting the key entirely yields `{}`, while writing an
+   * explicit `null` yields an empty body — the two are deliberately different.
+   */
   body?: Body
+  /** Extra response headers. */
   headers?: Record<string, string>
+  /** Content-Type; defaults to `"application/json"`. */
   content_type?: string
+  /** Artificial delay in milliseconds; defaults to 0. */
   delay_ms?: number
+  /** Extra condition on a GraphQL request body. `null` or absent means none. */
   graphql?: GraphQLConditionData | null
 }
 
@@ -98,6 +116,12 @@ export class Rule {
   /** Set by `RuleEngine.intercept` to compute the body per request. */
   bodyHandler?: BodyHandler
 
+  /**
+   * Build a rule directly. Every field of `response` that is left out falls
+   * back to the default: 200, an empty JSON body, and no delay.
+   *
+   * Prefer {@link Rule.fromData} when the source is a rules file.
+   */
   constructor(init: {
     pattern: string
     response?: Partial<MockResponse>

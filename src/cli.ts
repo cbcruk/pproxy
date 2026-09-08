@@ -15,9 +15,12 @@ import { getMatcher } from './matching.js'
 import { startProxy } from './proxy.js'
 import { caPaths, ensureCA, trustCA, trustCommand } from './ca.js'
 
+/** Loopback, so a MITM proxy is not exposed to the network by default. */
 const DEFAULT_HOST = '127.0.0.1'
+/** Conventional local proxy port. */
 const DEFAULT_PORT = 8080
 
+/** Help text for `-h`, and for an unrecognized command. */
 const USAGE = `usage: pproxy <command> [options]
 
 URL pattern-based HTTP response interceptor.
@@ -32,15 +35,27 @@ commands:
   cert <action>     manage the HTTPS CA — path | install | uninstall
 `
 
+/** The parsed command line, shared by every subcommand. */
 interface Options {
+  /** Interface to bind, from `-H`/`--host`. */
   host: string
+  /** Port to listen on, from `-p`/`--port`. */
   port: number
+  /** Log every interception, from `-v`/`--verbose`. */
   verbose: boolean
+  /** Skip HTTPS interception, from `--http-only`. Needs no CA. */
   httpOnly: boolean
+  /** Arguments that are not flags — the rules file, or the `cert` action. */
   positional: string[]
 }
 
-/** Parse the flags this CLI accepts. Unknown flags are an error. */
+/**
+ * Parse the flags this CLI accepts. Unknown flags are an error.
+ *
+ * @param argv Arguments after the subcommand name.
+ * @throws If a flag is unrecognized, missing its value, or the port is not in
+ * 0–65535.
+ */
 export function parseArgs(argv: string[]): Options {
   const options: Options = {
     host: DEFAULT_HOST,
@@ -82,13 +97,25 @@ export function parseArgs(argv: string[]): Options {
   return options
 }
 
+/**
+ * Read the value that follows a flag.
+ *
+ * @throws If the flag was the last argument.
+ */
 function expectValue(argv: string[], index: number, flag: string): string {
   const value = argv[index]
   if (value === undefined) throw new Error(`${flag}: expected a value`)
   return value
 }
 
-/** Build an engine and loader for a rules file, and do the initial load. */
+/**
+ * Build an engine and loader for a rules file, and do the initial load.
+ *
+ * The initial load goes through the loader, so a rules file that does not parse
+ * leaves an empty engine and logs the reason rather than throwing.
+ *
+ * @throws If the file's extension has no registered format.
+ */
 export function loadEngine(rulesPath: string): { engine: RuleEngine; loader: Loader } {
   const engine = new RuleEngine()
   const loader = getLoader(rulesPath, engine)
@@ -96,6 +123,12 @@ export function loadEngine(rulesPath: string): { engine: RuleEngine; loader: Loa
   return { engine, loader }
 }
 
+/**
+ * `pproxy run` — start the proxy and block until SIGINT or SIGTERM.
+ *
+ * @returns The process exit code: 0 on clean shutdown, 1 when the rules file is
+ * missing or unloadable, 2 when it was not given.
+ */
 async function runCommand(options: Options): Promise<number> {
   const rulesPath = options.positional[0]
   if (!rulesPath) {
@@ -144,7 +177,16 @@ async function runCommand(options: Options): Promise<number> {
   return 0
 }
 
-/** Load a rules file, report what it contains, and validate each rule. */
+/**
+ * `pproxy check` — load a rules file, print each rule, and validate it.
+ *
+ * Reads without the loader's keep-last-valid safety net, since reporting
+ * exactly what is wrong is the point of the command.
+ *
+ * @returns The process exit code: 0 when every rule is valid, 1 when the file
+ * is missing, unloadable, empty, or names an unknown matcher, 2 when no file
+ * was given.
+ */
 export function checkCommand(options: Options): number {
   const rulesPath = options.positional[0]
   if (!rulesPath) {
@@ -156,8 +198,6 @@ export function checkCommand(options: Options): number {
     return 1
   }
 
-  // Read without the loader's keep-last-valid safety net: reporting exactly
-  // what is wrong with the file is the whole point of this command.
   const engine = new RuleEngine()
   try {
     engine.load(readRules(rulesPath))
@@ -193,6 +233,13 @@ export function checkCommand(options: Options): number {
   return 0
 }
 
+/**
+ * `pproxy cert` — print the CA path, or trust/untrust it on macOS.
+ *
+ * @returns The process exit code: `security`'s own status for install and
+ * uninstall, 1 when the certificate does not exist yet or the platform is not
+ * macOS, 2 for an unknown action.
+ */
 async function certCommand(options: Options): Promise<number> {
   const action = options.positional[0] ?? 'path'
 
@@ -222,6 +269,16 @@ async function certCommand(options: Options): Promise<number> {
   return trustCA(certPath, action)
 }
 
+/**
+ * Dispatch a command line to its subcommand.
+ *
+ * Returns an exit code rather than calling `process.exit`, so tests can drive
+ * the whole CLI in-process.
+ *
+ * @param argv Full argument list; defaults to the real one.
+ * @returns The process exit code. 2 covers usage errors, including a bare
+ * invocation with no command.
+ */
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv
   if (!command || command === '-h' || command === '--help') {
@@ -251,6 +308,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 }
 
+/** True when run as `pproxy`, false when imported by a test. */
 const invokedDirectly = process.argv[1] && import.meta.url === `file://${process.argv[1]}`
 if (invokedDirectly) {
   main().then(

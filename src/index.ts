@@ -3,7 +3,35 @@
  *
  * The rule engine is independent of the proxy: import {@link RuleEngine} on
  * its own to unit test rules, or {@link startProxy} to run them against real
- * traffic.
+ * traffic. Nothing in the engine layer touches mockttp, so a rule can be
+ * asserted on in a plain unit test with no server and no certificates.
+ *
+ * Rules can come from a file — the shape `pproxy run rules.json` loads — or be
+ * registered in code, where a handler computes the body per request.
+ *
+ * @example Assert on a rule with no proxy running
+ * ```ts
+ * import { RuleEngine } from 'pproxy'
+ *
+ * const engine = new RuleEngine().load([
+ *   { url_pattern: 'https://example.com/api/*', status_code: 200, body: { users: [] } },
+ * ])
+ *
+ * const mock = await engine.match('https://example.com/api/users/1')
+ * mock?.statusCode // 200
+ * ```
+ *
+ * @example Intercept live traffic
+ * ```ts
+ * import { RuleEngine, startProxy } from 'pproxy'
+ *
+ * const engine = new RuleEngine().load([{ url_pattern: 'https://example.com/api/*', body: {} }])
+ * const server = await startProxy(engine, null, { port: 8080 })
+ *
+ * await server.stop()
+ * ```
+ *
+ * @module
  */
 
 export { RuleEngine, serializeBody } from './engine.js'

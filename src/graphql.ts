@@ -5,10 +5,11 @@
  */
 
 /**
- * Extracts the operation name from raw query text.
+ * Captures the name after `query`, `mutation`, or `subscription` in a GraphQL
+ * document.
  *
- * Used only when the request omits the `operationName` field, which many
- * GraphQL clients do for single-operation documents.
+ * Consulted only when the request omits the `operationName` field, which many
+ * clients do for single-operation documents.
  */
 const OPERATION_NAME_RE = /\b(?:query|mutation|subscription)\s+([_A-Za-z][_0-9A-Za-z]*)/
 
@@ -25,9 +26,16 @@ export interface GraphQLRequest {
   variables: Record<string, unknown>
 }
 
-/** The `graphql` block of a rule, as it appears in a rules file. */
+/**
+ * The `graphql` block of a rule, as it appears in a rules file.
+ *
+ * snake_case to match the rules-file format; {@link GraphQLCondition} is the
+ * in-memory form.
+ */
 export interface GraphQLConditionData {
+  /** Operation name that must match. Absent or empty means "any operation". */
   operation_name?: string
+  /** Variables the request must contain, compared as a subset. */
   variables?: Record<string, unknown> | null
 }
 
@@ -38,6 +46,7 @@ export interface GraphQLConditionData {
  * parseable GraphQL request, which is a way to mock a whole endpoint.
  */
 export class GraphQLCondition {
+  /** Build a condition. Both arguments default to "match anything". */
   constructor(
     /** Required operation name. Empty means "any operation". */
     readonly operationName: string = '',
@@ -132,10 +141,17 @@ export function containsSubset(actual: unknown, expected: unknown): boolean {
   return deepEqual(actual, expected)
 }
 
+/** Narrow to a non-array object, the only shape compared key by key. */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Structural equality for the JSON shapes a rules file can hold.
+ *
+ * Stricter than {@link containsSubset}: objects must have exactly the same
+ * keys, and arrays the same items in the same order.
+ */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (Array.isArray(a) || Array.isArray(b)) {
