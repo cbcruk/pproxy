@@ -92,6 +92,12 @@ const RULES = [
     status_code: 200,
     body: { data: { user: { id: '42' } } },
   },
+  { name: 'patch_root', url_pattern: '*/patch-me*', merge_patch: { upstream: false, added: true } },
+  {
+    name: 'patch_items',
+    url_pattern: '*/items*',
+    patches: [{ path: 'items[].status', value: 'DONE' }],
+  },
 ]
 
 describe('proxy (HTTP)', () => {
@@ -102,6 +108,16 @@ describe('proxy (HTTP)', () => {
   beforeAll(async () => {
     upstream = getLocal()
     await upstream.start()
+    // `.always()` on each: without it a mockttp rule reports itself maybe-done
+    // after one request, and the catch-all below takes over the second.
+    await upstream
+      .forGet('/items')
+      .always()
+      .thenJson(200, { items: [{ id: 1, status: 'PENDING' }, { id: 2, status: 'PENDING' }] })
+    await upstream.forGet('/teapot').always().thenJson(418, { upstream: true })
+    // A separate path from /graphql, which other tests expect to fall through
+    // to the catch-all.
+    await upstream.forPost('/gql').always().thenJson(200, { items: [{ status: 'PENDING' }] })
     await upstream.forAnyRequest().thenJson(200, { upstream: true })
   })
 
@@ -131,6 +147,92 @@ describe('proxy (HTTP)', () => {
     const reply = await viaProxy(proxy.port, `http://127.0.0.1:${upstream.port}/health`)
     expect(reply.status).toBe(200)
     expect(JSON.parse(reply.body)).toEqual({ upstream: true })
+  })
+
+  it('patches a passed-through response with a merge patch', async () => {
+    const reply = await viaProxy(proxy.port, `http://127.0.0.1:${upstream.port}/patch-me`)
+    expect(reply.status).toBe(200)
+    // Longer than the body the server sent, so a stale content-length would
+    // truncate it here rather than silently passing.
+    expect(JSON.parse(reply.body)).toEqual({ upstream: false, added: true })
+  })
+
+  it('rewrites a field across an array with a path patch', async () => {
+    const reply = await viaProxy(proxy.port, `http://127.0.0.1:${upstream.port}/items`)
+    expect(JSON.parse(reply.body)).toEqual({
+      items: [
+        { id: 1, status: 'DONE' },
+        { id: 2, status: 'DONE' },
+      ],
+    })
+  })
+
+  it('keeps the status the real server returned', async () => {
+    const engineWithPatch = new RuleEngine().load([
+      { url_pattern: '*/teapot*', merge_patch: { patched: true } },
+    ])
+    const patchProxy = await startProxy(engineWithPatch, null, { host: '127.0.0.1' })
+    try {
+      const reply = await viaProxy(patchProxy.port, `http://127.0.0.1:${upstream.port}/teapot`)
+      expect(reply.status).toBe(418)
+      expect(JSON.parse(reply.body)).toEqual({ upstream: true, patched: true })
+    } finally {
+      await patchProxy.stop()
+    }
+  })
+
+  it('reports patched requests separately from mocked ones', async () => {
+    const onIntercept = vi.fn()
+    const onTransform = vi.fn()
+    const watched = await startProxy(new RuleEngine().load(RULES), null, {
+      host: '127.0.0.1',
+      onIntercept,
+      onTransform,
+    })
+    try {
+      await viaProxy(watched.port, `http://127.0.0.1:${upstream.port}/patch-me`)
+      expect(onTransform).toHaveBeenCalledTimes(1)
+      expect(onTransform.mock.calls[0]?.[1]).toBe(200)
+      expect(onIntercept).not.toHaveBeenCalled()
+    } finally {
+      await watched.stop()
+    }
+  })
+
+  it('asks the engine once per request, not once per mockttp rule', async () => {
+    const findRule = vi.spyOn(engine, 'findRule')
+    await viaProxy(proxy.port, `http://127.0.0.1:${upstream.port}/health`)
+    expect(findRule).toHaveBeenCalledTimes(1)
+  })
+
+  it('reflects the Origin on patched responses too', async () => {
+    const reply = await viaProxy(proxy.port, `http://127.0.0.1:${upstream.port}/patch-me`, {
+      headers: { origin: 'http://localhost:3000' },
+    })
+    expect(reply.headers['access-control-allow-origin']).toBe('http://localhost:3000')
+  })
+
+  it('patches only the GraphQL operation its condition names', async () => {
+    const engineWithPatch = new RuleEngine().load([
+      {
+        url_pattern: '*/gql*',
+        graphql: { operation_name: 'GetItems' },
+        patches: [{ path: 'items[].status', value: 'DONE' }],
+      },
+    ])
+    const patchProxy = await startProxy(engineWithPatch, null, { host: '127.0.0.1' })
+    const post = (operationName: string) =>
+      viaProxy(patchProxy.port, `http://127.0.0.1:${upstream.port}/gql`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: `query ${operationName} { items { status } }` }),
+      })
+    try {
+      expect(JSON.parse((await post('GetItems')).body)).toEqual({ items: [{ status: 'DONE' }] })
+      expect(JSON.parse((await post('GetOther')).body)).toEqual({ items: [{ status: 'PENDING' }] })
+    } finally {
+      await patchProxy.stop()
+    }
   })
 
   it('reflects the Origin on mocked responses', async () => {

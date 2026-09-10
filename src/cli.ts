@@ -162,6 +162,8 @@ async function runCommand(options: Options): Promise<number> {
     https: https ? { keyPath: https.keyPath, certPath: https.certPath } : undefined,
     onIntercept: (url, mock) =>
       console.log(`[pproxy] intercepted: ${url} → ${mock.statusCode}`),
+    onTransform: (url, statusCode) =>
+      console.log(`[pproxy] patched: ${url} → ${statusCode}`),
   })
 
   console.log(`[pproxy] listening on ${options.host}:${server.port} — rules: ${rulesPath}`)
@@ -223,9 +225,10 @@ export function checkCommand(options: Options): number {
     }
     const label = rule.name ? ` (${rule.name})` : ''
     const condition = rule.graphql ? ` graphql:${rule.graphql.describe()}` : ''
-    console.log(
-      `  ${rule.matcher.padEnd(5)} ${rule.pattern}${condition} → ${rule.response.statusCode}${label}`,
-    )
+    // A transform rule has no status of its own — the server's is kept — so
+    // show what it patches instead, which is the part worth proofreading.
+    const outcome = rule.transform ? rule.transform.describe() : String(rule.response.statusCode)
+    console.log(`  ${rule.matcher.padEnd(5)} ${rule.pattern}${condition} → ${outcome}${label}`)
   }
 
   if (failed) return 1

@@ -7,6 +7,11 @@
  */
 
 import { GraphQLCondition, type GraphQLConditionData, type GraphQLRequest } from './graphql.js'
+import {
+  ResponseTransform,
+  type PathPatchData,
+  type ResponseTransformData,
+} from './patching.js'
 
 /** A response body as it can be written in a rules file or returned by a handler. */
 export type Body = Record<string, unknown> | unknown[] | string | Buffer | null
@@ -86,6 +91,21 @@ export interface RuleData {
   delay_ms?: number
   /** Extra condition on a GraphQL request body. `null` or absent means none. */
   graphql?: GraphQLConditionData | null
+  /**
+   * A JSON merge patch (RFC 7386) applied to the real server's response.
+   * Setting it makes the rule transform rather than mock, so it cannot be
+   * combined with `body`.
+   *
+   * This and `patches` are the two fields the archived Python implementation
+   * does not know. It ignores unknown keys, so it reads such a rule as a mock
+   * with an empty body — a rules file holding one is no longer portable.
+   */
+  merge_patch?: unknown
+  /**
+   * Path patches applied to the real server's response. Like `merge_patch`,
+   * this makes the rule transform rather than mock.
+   */
+  patches?: PathPatchData[] | null
 }
 
 /** A handler that builds the response body from the request. */
@@ -94,9 +114,10 @@ export type BodyHandler = (url: string, graphql: GraphQLRequest | null) => Body 
 /**
  * A single URL interception rule.
  *
- * Binds a URL pattern to a mock response. When the engine encounters a
- * request URL that matches `pattern`, it returns `response` instead of
- * forwarding the request to the real server.
+ * Binds a URL pattern to one of two outcomes. A mocking rule returns
+ * {@link response} instead of forwarding the request. A transforming rule
+ * carries a {@link transform} instead: the request reaches the real server and
+ * the response comes back patched.
  */
 export class Rule {
   /** URL pattern string. Format depends on {@link matcher}. */
@@ -113,6 +134,15 @@ export class Rule {
    * one `/graphql` endpoint.
    */
   readonly graphql: GraphQLCondition | null
+  /**
+   * The edit to make to the real server's response, or `null` when the rule
+   * mocks instead.
+   *
+   * A transform rule lets the request reach the server and patches what comes
+   * back, so `response.statusCode`, `response.headers` and `response.body` are
+   * unused — the server's own are kept. `response.delayMs` still applies.
+   */
+  readonly transform: ResponseTransform | null
   /** Set by `RuleEngine.intercept` to compute the body per request. */
   bodyHandler?: BodyHandler
 
@@ -128,11 +158,13 @@ export class Rule {
     matcher?: string
     name?: string
     graphql?: GraphQLCondition | null
+    transform?: ResponseTransform | null
   }) {
     this.pattern = init.pattern
     this.matcher = init.matcher ?? 'glob'
     this.name = init.name ?? ''
     this.graphql = init.graphql ?? null
+    this.transform = init.transform ?? null
     this.response = {
       statusCode: 200,
       body: null,
@@ -146,17 +178,27 @@ export class Rule {
   /**
    * Create a Rule from a rules-file entry.
    *
-   * @throws If `url_pattern` is missing.
+   * @throws If `url_pattern` is missing, if a patch path is malformed, or if
+   * the rule sets both `body` and a transform — mocking and patching the same
+   * response are contradictory, and guessing which was meant would hide the
+   * mistake until the rule ran.
    */
   static fromData(data: RuleData): Rule {
     if (typeof data?.url_pattern !== 'string') {
       throw new Error(`rule is missing "url_pattern": ${JSON.stringify(data)}`)
+    }
+    const transform = ResponseTransform.fromData(data as ResponseTransformData)
+    if (transform !== null && 'body' in data) {
+      throw new Error(
+        `rule sets both "body" and a transform ("merge_patch"/"patches"): ${data.url_pattern}`,
+      )
     }
     return new Rule({
       pattern: data.url_pattern,
       matcher: data.matcher ?? 'glob',
       name: data.name ?? '',
       graphql: data.graphql != null ? GraphQLCondition.fromData(data.graphql) : null,
+      transform,
       response: {
         statusCode: data.status_code ?? 200,
         body: 'body' in data ? (data.body as Body) : {},

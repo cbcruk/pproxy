@@ -159,6 +159,69 @@ the real server untouched:
 - `application/graphql` bodies and multipart file uploads
 - persisted queries (APQ) that send only a hash, with no query text
 
+### Patching the real response
+
+A rule with a `body` mocks: the server is never contacted. A rule with
+`merge_patch` or `patches` *transforms* instead — the request goes upstream
+and the response comes back edited. That is the cheaper option when a schema
+is large and only a field or two has to change, and it keeps the parts of the
+response you did not think about correct.
+
+`merge_patch` is a JSON merge patch (RFC 7386). Keys merge recursively, and a
+`null` deletes one.
+
+```json
+[
+  {
+    "name": "confirmed",
+    "url_pattern": "*/graphql",
+    "graphql": { "operation_name": "GetAppointment" },
+    "merge_patch": { "data": { "appointment": { "status": "CONFIRMED" } } }
+  }
+]
+```
+
+A merge patch treats an array as a single value, so it cannot reach inside
+one. `patches` covers that: each entry writes `value` at `path`, where a dot
+descends into an object, `[n]` selects one element, and an empty `[]` selects
+every element.
+
+```json
+[
+  {
+    "url_pattern": "*/graphql",
+    "graphql": { "operation_name": "GetAppointments" },
+    "patches": [
+      { "path": "data.appointments[].status", "value": "CONFIRMED" },
+      { "path": "data.appointments[0].id", "value": "first" }
+    ]
+  }
+]
+```
+
+Both may appear on one rule: the merge patch runs first, then each path patch
+in order. A rule cannot set `body` *and* a transform — mocking and patching
+the same response are contradictory, and `check` says so rather than guessing.
+
+A transform keeps the status and headers the real server sent, so
+`status_code` and `headers` have no effect on such a rule. `delay_ms` still
+does. Patching fails open: a response that is empty or is not JSON reaches the
+client untouched, and so does one whose rule disappeared during the round
+trip.
+
+Transforms are the one part of the rules file the archived Python
+implementation does not understand. It ignores keys it does not know, so it
+reads a transform rule as a mock with an empty body and answers `{}`. Keep
+transform rules out of any file you still run through `archive/python/`.
+
+`check` prints what a transform rule patches, in place of the status code a
+mocking rule would show:
+
+```
+  glob  */graphql graphql:GetAppointment → patch(merge_patch) (confirmed)
+  glob  */graphql graphql:GetAppointments → patch(data.appointments[].status)
+```
+
 ### Response delay
 
 Set `delay_ms` to simulate a slow API.
@@ -201,6 +264,19 @@ engine.intercept(
   (_url, gql) => ({ data: { user: { id: gql?.variables['id'] } } }),
   { graphql: { operation_name: 'GetUser' } },
 )
+```
+
+Transforms are pure functions, so they can be asserted on without a server
+too:
+
+```ts
+import { ResponseTransform } from 'pproxy'
+
+const transform = ResponseTransform.fromData({
+  patches: [{ path: 'items[].status', value: 'DONE' }],
+})
+
+transform?.apply({ items: [{ status: 'PENDING' }] }) // { items: [{ status: 'DONE' }] }
 ```
 
 To run an engine against real traffic:

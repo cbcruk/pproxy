@@ -151,4 +151,38 @@ describe('main', () => {
     expect(await main(['cert', 'renew'])).toBe(2)
     expect(err.join('\n')).toMatch(/unknown action 'renew'/)
   })
+  it('shows what a transform rule patches instead of a status code', () => {
+    const file = rules('patch.json', [
+      { url_pattern: '*/graphql', merge_patch: { data: null }, name: 'strip' },
+      { url_pattern: '*/items*', patches: [{ path: 'items[].status', value: 'DONE' }] },
+    ])
+    expect(check(file)).toBe(0)
+    expect(out[0]).toContain('→ patch(merge_patch) (strip)')
+    expect(out[1]).toContain('→ patch(items[].status)')
+  })
+
+  it('reports a rule that both mocks and patches', () => {
+    const file = rules('conflict.json', [
+      { url_pattern: '*/api/*', body: {}, merge_patch: { a: 1 } },
+    ])
+    expect(check(file)).toBe(1)
+    expect(err.join('\n')).toContain('both "body" and a transform')
+  })
+
+  it('treats an empty patch list as a mock, not a transform', () => {
+    const file = rules('empty-patches.json', [
+      { url_pattern: '*/api/*', body: { ok: true }, patches: [] },
+    ])
+    expect(check(file)).toBe(0)
+    expect(out[0]).toContain('→ 200')
+  })
+
+  it('reports a malformed patch path', () => {
+    const file = rules('bad-path.json', [
+      { url_pattern: '*/api/*', patches: [{ path: 'items[z]', value: 1 }] },
+    ])
+    expect(check(file)).toBe(1)
+    expect(err.join('\n')).toContain('invalid array index')
+  })
+
 })
