@@ -45,6 +45,8 @@ export {
   containsSubset,
 } from './graphql.js'
 export type { GraphQLConditionData, GraphQLRequest } from './graphql.js'
+export { ResponseTransform, mergePatch, parsePath } from './patching.js'
+export type { PathPatchData, PathStep, ResponseTransformData } from './patching.js'
 export {
   MATCHERS,
   getMatcher,

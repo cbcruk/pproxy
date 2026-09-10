@@ -2,19 +2,23 @@
  * The mockttp adapter.
  *
  * Contains no business logic — it translates between mockttp's request
- * objects and the engine's plain types, and wires the engine in as two
+ * objects and the engine's plain types, and wires the engine in as three
  * mockttp rules:
  *
- *   1. everything the engine matches gets a mocked response,
- *   2. everything else is passed through to the real server.
+ *   1. a matched transform rule passes through and patches what comes back,
+ *   2. a matched mocking rule gets a mocked response,
+ *   3. everything else is passed through to the real server.
  *
- * Because the first rule's matcher consults the live engine, hot-reloading
- * the rules file needs no mockttp rules to be re-registered.
+ * The first two are one decision, not two: both matchers consult the same
+ * engine result for the request, so "first match wins" still holds across a
+ * rules file that mixes the two kinds. Because those matchers consult the live
+ * engine, hot-reloading the rules file needs no mockttp rules to be
+ * re-registered.
  */
 
 import * as net from 'node:net'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { getLocal, type CompletedRequest, type Mockttp } from 'mockttp'
+import { getLocal, type CompletedRequest, type Headers, type Mockttp } from 'mockttp'
 
 import type { RuleEngine, Match } from './engine.js'
 import type { Loader } from './loaders.js'
@@ -39,8 +43,14 @@ export interface ProxyOptions {
   port?: number
   /** CA key and certificate. Without it, only plain HTTP is intercepted. */
   https?: { keyPath: string; certPath: string }
-  /** Called for every intercepted request. */
+  /** Called for every mocked request. */
   onIntercept?: (url: string, response: MockResponse) => void
+  /**
+   * Called for every request whose response was patched, with the status the
+   * real server returned. Separate from {@link onIntercept} because a
+   * transform has no {@link MockResponse} to report.
+   */
+  onTransform?: (url: string, statusCode: number) => void
 }
 
 /** Flatten mockttp's header map into the engine's `Record<string, string>`. */
@@ -70,22 +80,40 @@ async function toProxyRequest(request: CompletedRequest): Promise<ProxyRequest> 
   }
 }
 
+/** What the engine said about one request. */
+interface Decision {
+  /** The request in the engine's own types, with its body decoded once. */
+  request: ProxyRequest
+  /** The rule that matched, or `null` when the request passes through. */
+  match: Match | null
+}
+
 /**
- * Carries the match found while testing the rule over to the handler that
- * builds the response, so the body is only parsed once per request.
+ * Holds each request's decision for the rest of that request.
  *
- * Entries are consumed by the handler that runs immediately afterwards; the
- * cap bounds the leak if a client disconnects in between.
+ * Two matchers and a handler may all ask about the same request — the
+ * transform rule's matcher, the mocking rule's, and whichever handler runs —
+ * and deciding once means the body is decoded and the rules walked once.
+ *
+ * What is stored is the in-flight promise rather than the settled decision,
+ * because mockttp evaluates its rules' matchers concurrently. Storing the
+ * result would let both matchers start before either had anything to find.
+ *
+ * An entry is dropped as soon as nothing else will ask: by the handler that
+ * responds, or by the second matcher when nothing matched. The cap bounds the
+ * leak if a client disconnects before that. A transform's handler only runs
+ * once the real server has answered, so its entry is held for a whole round
+ * trip.
  */
 class PendingMatches {
-  /** Matches awaiting their handler, keyed by mockttp's request id. */
-  #entries = new Map<string, { request: ProxyRequest; match: Match }>()
+  /** Decisions awaiting their handler, keyed by mockttp's request id. */
+  #entries = new Map<string, Promise<Decision>>()
 
-  /** @param limit How many unclaimed matches to hold before evicting the oldest. */
+  /** @param limit How many unclaimed decisions to hold before evicting the oldest. */
   constructor(private readonly limit = 500) {}
 
-  /** Store a match, evicting the oldest entry once the cap is reached. */
-  set(id: string, value: { request: ProxyRequest; match: Match }): void {
+  /** Store a decision, evicting the oldest entry once the cap is reached. */
+  set(id: string, value: Promise<Decision>): void {
     if (this.#entries.size >= this.limit) {
       const oldest = this.#entries.keys().next()
       if (!oldest.done) this.#entries.delete(oldest.value)
@@ -93,17 +121,42 @@ class PendingMatches {
     this.#entries.set(id, value)
   }
 
+  /** Return a stored decision without consuming it, for the second matcher. */
+  peek(id: string): Promise<Decision> | undefined {
+    return this.#entries.get(id)
+  }
+
+  /** Forget a decision nothing else will ask about. */
+  drop(id: string): void {
+    this.#entries.delete(id)
+  }
+
   /**
-   * Remove and return a stored match.
+   * Remove and return a stored decision.
    *
-   * @returns The match, or `undefined` when the entry was evicted — the caller
-   * then matches again rather than failing.
+   * @returns The decision, or `undefined` when the entry was evicted — the
+   * caller then matches again rather than failing.
    */
-  take(id: string): { request: ProxyRequest; match: Match } | undefined {
+  take(id: string): Promise<Decision> | undefined {
     const value = this.#entries.get(id)
     this.#entries.delete(id)
     return value
   }
+}
+
+/**
+ * Drop the headers that describe the body that was replaced.
+ *
+ * A patched body is fresh, uncompressed JSON, so the real server's
+ * `content-encoding` would tell the client to gunzip plain text and its
+ * `content-length` would be wrong. mockttp sets the correct framing itself
+ * once these are gone.
+ */
+function withoutBodyFraming(headers: Headers): Headers {
+  const dropped = new Set(['content-encoding', 'content-length', 'transfer-encoding'])
+  return Object.fromEntries(
+    Object.entries(headers).filter(([key]) => !dropped.has(key.toLowerCase())),
+  )
 }
 
 /**
@@ -143,19 +196,71 @@ export async function startProxy(
 
   const pending = new PendingMatches()
 
+  /**
+   * Ask the engine about a request once, however many matchers enquire.
+   *
+   * The entry is stored before the first `await`, so a matcher that runs while
+   * the decision is still being made waits on it instead of repeating it.
+   */
+  const decide = (request: CompletedRequest): Promise<Decision> => {
+    const cached = pending.peek(request.id)
+    if (cached) return cached
+    const decision = toProxyRequest(request).then((proxyReq) => ({
+      request: proxyReq,
+      match: engine.findRule(proxyReq),
+    }))
+    pending.set(request.id, decision)
+    return decision
+  }
+
   await server
     .forAnyRequest()
     .always()
     .matching(async (request) => {
+      // The first matcher to run, so the rules file is reloaded here — an edit
+      // takes effect on the next request whether or not anything matches.
       loader?.reloadIfChanged()
-      const proxyReq = await toProxyRequest(request)
-      const match = engine.findRule(proxyReq)
-      if (match === null) return false
-      pending.set(request.id, { request: proxyReq, match })
-      return true
+      const { match } = await decide(request)
+      return match !== null && match.rule.transform !== null
+    })
+    .thenPassThrough({
+      beforeResponse: async (response, request) => {
+        const found = await pending.take(request.id)
+        const proxyReq = found?.request ?? (await toProxyRequest(request))
+        const match = found?.match ?? engine.findRule(proxyReq)
+        // The rules changed mid-request, or the body could not be decoded.
+        // Either way, hand the client what the server actually said.
+        if (match === null || match.rule.transform === null) return
+        const decoded = await response.body.getDecodedBuffer()
+        if (decoded === undefined) return
+
+        const patched = engine.resolveTransform(match, proxyReq, decoded)
+        options.onTransform?.(proxyReq.url, response.statusCode)
+        if (match.rule.response.delayMs > 0) await sleep(match.rule.response.delayMs)
+
+        return {
+          statusCode: response.statusCode,
+          headers: withoutBodyFraming(response.headers),
+          body: patched,
+        }
+      },
+    })
+
+  await server
+    .forAnyRequest()
+    .always()
+    .matching(async (request) => {
+      const { match } = await decide(request)
+      if (match === null) {
+        // Nothing else will ask about this one — it is on its way to the
+        // passthrough rule below — so release the entry now.
+        pending.drop(request.id)
+        return false
+      }
+      return match.rule.transform === null
     })
     .thenCallback(async (request) => {
-      const found = pending.take(request.id)
+      const found = await pending.take(request.id)
       const proxyReq = found?.request ?? (await toProxyRequest(request))
       const match = found?.match ?? engine.findRule(proxyReq)
       if (match === null) {

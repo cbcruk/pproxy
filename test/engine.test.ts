@@ -286,3 +286,69 @@ describe('GraphQL matching', () => {
     spy.mockRestore()
   })
 })
+
+describe('transform rules', () => {
+  const upstream = (value: unknown) => Buffer.from(JSON.stringify(value))
+
+  it('patches the real response instead of replacing it', () => {
+    const engine = new RuleEngine().load([
+      { url_pattern: '*/graphql', merge_patch: { data: { user: { name: 'patched' } } } },
+    ])
+    const request = proxyRequest('https://example.com/graphql')
+    const match = engine.findRule(request)!
+    const patched = engine.resolveTransform(match, request, upstream({ data: { user: { id: '1' } } }))
+    expect(JSON.parse(patched.toString())).toEqual({ data: { user: { id: '1', name: 'patched' } } })
+  })
+
+  it('rewrites a field across an array', () => {
+    const engine = new RuleEngine().load([
+      { url_pattern: '*/api/*', patches: [{ path: 'items[].status', value: 'DONE' }] },
+    ])
+    const request = proxyRequest('https://example.com/api/items')
+    const match = engine.findRule(request)!
+    const patched = engine.resolveTransform(match, request, upstream({ items: [{ status: 'A' }] }))
+    expect(JSON.parse(patched.toString())).toEqual({ items: [{ status: 'DONE' }] })
+  })
+
+  it('leaves a body that is not JSON untouched', () => {
+    const engine = new RuleEngine().load([{ url_pattern: '*/api/*', merge_patch: { a: 1 } }])
+    const request = proxyRequest('https://example.com/api/page')
+    const match = engine.findRule(request)!
+    const body = Buffer.from('<html></html>')
+    expect(engine.resolveTransform(match, request, body)).toBe(body)
+  })
+
+  it('leaves an empty body untouched', () => {
+    const engine = new RuleEngine().load([{ url_pattern: '*/api/*', merge_patch: { a: 1 } }])
+    const request = proxyRequest('https://example.com/api/page')
+    const match = engine.findRule(request)!
+    const body = Buffer.alloc(0)
+    expect(engine.resolveTransform(match, request, body)).toBe(body)
+  })
+
+  it('fires hooks once, as the mocking path does', () => {
+    const hook = vi.fn()
+    const engine = new RuleEngine().load([
+      { url_pattern: '*/api/*', name: 'patcher', merge_patch: { a: 1 } },
+    ])
+    engine.addHook(hook)
+    const request = proxyRequest('https://example.com/api/x')
+    engine.resolveTransform(engine.findRule(request)!, request, upstream({}))
+    expect(hook).toHaveBeenCalledTimes(1)
+    expect(hook.mock.calls[0]?.[1].name).toBe('patcher')
+  })
+
+  it('keeps first match wins across mocking and transforming rules', () => {
+    const engine = new RuleEngine().load([
+      { url_pattern: '*/api/*', merge_patch: { a: 1 } },
+      { url_pattern: '*/api/*', body: { mocked: true } },
+    ])
+    expect(engine.findRule('https://example.com/api/x')?.rule.transform).not.toBeNull()
+  })
+
+  it('rejects a rule that both mocks and patches', () => {
+    expect(() =>
+      new RuleEngine().load([{ url_pattern: '*/api/*', body: {}, merge_patch: { a: 1 } }]),
+    ).toThrow(/both "body" and a transform/)
+  })
+})

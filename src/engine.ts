@@ -208,6 +208,55 @@ export class RuleEngine {
     return { ...rule.response, body: await rule.bodyHandler(request.url, graphql) }
   }
 
+  /**
+   * Patch the real server's response for a matched transform rule.
+   *
+   * The counterpart to {@link resolveResponse} for rules that carry a
+   * {@link Rule.transform} rather than a body, and where hooks fire for them —
+   * once per interception, as on the mocking path.
+   *
+   * Fails open: a body that is empty or is not JSON comes back untouched,
+   * because a rule that cannot be applied should not corrupt a response the
+   * client would otherwise have received intact.
+   *
+   * @param body The real response body, already decoded.
+   * @returns The patched bytes, or `body` itself when nothing was applied.
+   *
+   * @example Patch a field without mocking the whole response
+   * ```ts
+   * import { RuleEngine, proxyRequest } from 'pproxy'
+   *
+   * const engine = new RuleEngine().load([
+   *   {
+   *     url_pattern: 'https://example.com/graphql',
+   *     merge_patch: { data: { user: { name: 'patched' } } },
+   *   },
+   * ])
+   *
+   * const request = proxyRequest('https://example.com/graphql')
+   * const match = engine.findRule(request)!
+   * const patched = engine.resolveTransform(match, request, Buffer.from('{"data":{"user":{"id":1}}}'))
+   *
+   * patched.toString() // {"data":{"user":{"id":1,"name":"patched"}}}
+   * ```
+   */
+  resolveTransform(match: Match, request: ProxyRequest, body: Buffer): Buffer {
+    const { rule } = match
+    for (const hook of this.#hooks) hook(request.url, rule)
+    if (rule.transform === null) return body
+
+    const text = body.toString('utf8')
+    if (!text.trim()) return body
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      return body
+    }
+    return Buffer.from(JSON.stringify(rule.transform.apply(parsed)), 'utf8')
+  }
+
   // ── Serialization ──────────────────────────────────────
 
   /**
